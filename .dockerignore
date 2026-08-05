@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+config/
+**/__pycache__/
+*.pyc
+*.sqlite3
+*.db
+docs/
+unraid/
+.DS_Store

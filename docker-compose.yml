@@ -1,0 +1,21 @@
+services:
+  sleutharr:
+    build: .
+    image: sleutharr:latest
+    container_name: sleutharr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      # Only needed if you reach Sleutharr through a reverse proxy on https.
+      # - SLEUTHARR_CSRF_TRUSTED_ORIGINS=https://sleutharr.example.com
+    volumes:
+      - ./config:/config
+      # Sleutharr never reads your media. It only compares path *strings*, so no media
+      # mounts are required -- configure the path-translation table in Settings instead.
+
+# All service URLs and API keys are configured in the web UI and stored in
+# /config/sleutharr.db, not here. Nothing about your setup belongs in this file.
