@@ -121,19 +121,35 @@ class RuleContext:
             return "", ""
         return f"{service.url}/activity/queue", f"{service.name} queue"
 
-    def plex_url(self) -> tuple[str, str]:
+    @property
+    def request_manager_links_entities(self) -> bool:
+        """Whether the request manager records which *arr record a request became.
+
+        Seerr and its relatives store an externalServiceId, so its absence is evidence
+        the push to the *arr failed. Ombi stores no such field at all, so on Ombi the
+        same absence means nothing and a rule must not claim otherwise.
+        """
+        from core.clients.requestmanager import CLIENT_BY_VARIANT
+
+        service = self.request.service
+        if service is None:
+            return True
+        cls = CLIENT_BY_VARIANT.get(service.variant)
+        return getattr(cls, "links_to_arr_entity", True)
+
+    def media_server_url(self) -> tuple[str, str]:
         """(url, label) for the Plex web UI, if a Plex service is configured."""
         from core.models import ServiceInstance, ServiceKind
 
         service = ServiceInstance.objects.filter(
-            kind=ServiceKind.PLEX, enabled=True
+            kind=ServiceKind.MEDIA_SERVER, enabled=True
         ).first()
         if service is None:
             return "", ""
-        if self.request.plex_rating_key:
+        if self.request.media_server_item_id:
             return (
                 f"{service.url}/web/index.html#!/server/-/details"
-                f"?key=%2Flibrary%2Fmetadata%2F{self.request.plex_rating_key}",
+                f"?key=%2Flibrary%2Fmetadata%2F{self.request.media_server_item_id}",
                 "Open in Plex",
             )
         return f"{service.url}/web", "Open Plex"

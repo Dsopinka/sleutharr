@@ -2,11 +2,13 @@
 
 **"I requested this — where did it die?"**
 
-Sleutharr stitches a single media request into one timeline across
-Seerr/Overseerr/Jellyseerr, Sonarr/Radarr, your download client and Plex, then tells you
-where the chain broke and what to do about it.
+Sleutharr stitches a single media request into one timeline across your request manager,
+Sonarr/Radarr, your download client and your media server, then tells you where the chain
+broke and what to do about it.
 
-It is **read-only**. Sleutharr never writes to any *arr app, download client or Plex.
+It is **read-only by default**. The one exception is a "remove & blocklist" button for
+stuck downloads, which always asks first and never runs on its own. See
+[Fixing things](#fixing-things).
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -24,6 +26,27 @@ symptom rarely matches the cause:
 
 Sleutharr's output is a **single verdict per request**, with the evidence that supports it
 and the specific next action. Anything that does not serve that verdict is out of scope.
+
+## Supported services
+
+| Role | Supported |
+|---|---|
+| Request manager | **Seerr** (primary), Overseerr, Jellyseerr, Ombi |
+| Library | Sonarr, Radarr — any number of instances, including 4K splits |
+| Download client | qBittorrent, Transmission, Deluge, SABnzbd, NZBGet |
+| Media server | Plex, Jellyfin, Emby |
+
+Adding a product never touches the diagnosis layer: the rules reason about the *role* a
+service plays in the chain, not the product filling it.
+
+Two capability differences are worth knowing before you pick:
+
+* **Ombi** records no link between a request and the Sonarr/Radarr record it became, and
+  has no 4K lane. Sleutharr falls back to matching on TMDB/TVDB id, and softens the
+  "never added" verdict accordingly rather than claiming a hand-off failed when it cannot
+  actually tell. Seerr-family managers give a much stronger join.
+* **Jellyfin/Emby** expose `ProviderIds`, so the id join works without anything stored on
+  the request manager's side. Plex needs the rating key the request manager recorded.
 
 ### Related projects
 
@@ -47,8 +70,8 @@ and the specific next action. Anything that does not serve that verdict is out o
 | `DOWNLOADED_NOT_IMPORTED` | error | The client finished; the import is blocked. Quotes the *arr's error. |
 | `DOWNLOAD_CLIENT_ERROR` | error | The client reports `error` or `missingFiles`. |
 | `GRABBED_BUT_STALLED` | warning | In the client, no meaningful progress, or zero seeds. |
-| `PLEX_PATH_MISMATCH` | warning | Plex has the file, but no path mapping resolves to it. |
-| `IMPORTED_NOT_IN_PLEX` | warning | Imported past the grace period, still absent from Plex. |
+| `PATH_MISMATCH` | warning | The media server has the file, but no path mapping resolves to it. |
+| `NOT_IN_MEDIA_SERVER` | warning | Imported past the grace period, still absent from the media server. |
 | `WRONG_QUALITY` | info | Imported below the profile cutoff but marked available. The silent one. |
 | `NOT_RELEASED_YET` | info | Nothing grabbed because no release exists yet. Expected, not a fault. |
 | `NEVER_SEARCHED` | warning | Monitored and available, but the *arr never ran a search. |
@@ -111,8 +134,15 @@ the web UI** and stored in SQLite.
 
 ### Services
 
-Add one request manager, then each Sonarr/Radarr instance, your download client, and Plex.
-Use **Test** on the Health page to verify each one before relying on it.
+Add one request manager, then each Sonarr/Radarr instance, your download clients, and your
+media server. The form adapts to what you pick — choosing a kind narrows the product list
+and hides fields that do not apply. Use **Test** on the Health page to verify each one
+before relying on it.
+
+**If you run more than one usenet client**, set each one's *name inside Sonarr/Radarr*.
+SABnzbd and NZBGet download ids are only unique within a single instance — NZBGet hands out
+plain integers like `42` — so Sleutharr matches queue rows by the client name the *arr
+reports. Torrent clients use globally-unique infohashes and need nothing extra.
 
 ![Health](docs/screenshots/health.png)
 
@@ -137,32 +167,78 @@ Radarr may see `/data/media/movies` where Plex sees `/movies`, because the two c
 mount the same storage at different points. No API exposes this — it is deployment
 configuration, so you have to tell Sleutharr about it.
 
-You usually do not have to work it out yourself. When Sleutharr can see an item in Plex via
-its rating key but no path resolves to it, it reports `PLEX_PATH_MISMATCH` and names the
+You usually do not have to work it out yourself. When Sleutharr can see an item in the
+media server by id but no path resolves to it, it reports `PATH_MISMATCH` and names the
 exact prefix pair that would fix it. Paste that into the mapping table.
+
+---
+
+## Fixing things
+
+Sleutharr is a diagnostic tool, not an automation tool. It performs exactly one kind of
+write, and only when you click it and confirm:
+
+**Remove & blocklist** appears on any request with a stuck queue entry. It:
+
+1. deletes the partially-downloaded files from the download client,
+2. blocklists the release so the *arr will not grab it again,
+3. lets the *arr search for a different release itself.
+
+The removal is sent to Sonarr/Radarr rather than straight to the download client, so the
+*arr stays consistent with its own queue and history. Every action is recorded in an audit
+log on the Settings page and on the request's own timeline.
+
+### Why there is no auto-remove
+
+It was considered and deliberately left out. Diagnosis rules are heuristics over five
+services that disagree with each other in small ways, and they will misfire — during
+development, a bug in the stall rule read "tracker withheld the swarm count" as "zero
+seeds", which would have condemned every healthy private-tracker torrent. That bug was
+caught by a test. Had it been wired to a delete key, it would have destroyed real
+downloads first and been noticed afterwards.
+
+A wrong badge costs you ten seconds. A wrong deletion costs you the download, and the
+blocklist means the *arr will not fetch that release again. The asymmetry is not close, so
+the human stays in the loop.
+
+There is also a **search again** button, off by default, under Settings. It is usually
+unnecessary: removing with blocklist already makes the *arr search for a replacement. It
+exists for the case where nothing was ever grabbed at all.
 
 ---
 
 ## How the join works
 
 ```
-Request manager                 Sonarr / Radarr           Download client        Plex
-──────────────────              ───────────────           ───────────────        ────
-MediaRequest.is4k ──selects──►  externalServiceId[4k] ──► downloadId ──────────► ratingKey[4k]
-                                (movieId / seriesId)      (= infohash)           + path match
-   │                                   │                        │                    │
-   └── tmdbId / tvdbId ────fallback────┘                        │                    │
-                                                                └── path mappings ───┘
+Request manager               Sonarr / Radarr         Download client      Media server
+────────────────              ───────────────         ───────────────      ────────────
+MediaRequest.is4k ─selects─►  externalServiceId[4k] ─► downloadId ───────► ratingKey[4k]
+                              (movieId / seriesId)     (see below)          or ProviderIds
+   │                                 │                      │                    │
+   └── tmdbId / tvdbId ──fallback────┘                      │                    │
+       (always, on Ombi)                                    └── path mappings ────┘
 ```
+
+`downloadId` is **not** one kind of value, which is the single easiest thing to get wrong
+here. Read from Sonarr's own client implementations:
+
+| Client | `downloadId` is |
+|---|---|
+| qBittorrent / Transmission / Deluge | the infohash, uppercased by the *arr |
+| SABnzbd | an opaque `nzo_id` string |
+| NZBGet | **a decimal integer**, unique only within one instance |
 
 1. **Request manager → *arr.** `serviceId` picks the instance, `externalServiceId` the
    record — both read from the 4K-aware half of the pair. Falls back to `tmdbId`/`tvdbId`
    when null, which is exactly the case when the push to the *arr failed — and that is
    itself the `NEVER_ADDED` diagnosis.
 2. ***arr → history.** Per-entity history is the spine of the timeline.
-3. ***arr → download client.** The queue's `downloadId` is the torrent infohash.
-4. ***arr → Plex.** Both the stored rating key and a path match, because running both is
-   what distinguishes "not scanned yet" from "wrong path mapping".
+3. ***arr → download client.** Ids are normalised case-insensitively and, for usenet,
+   scoped to the client the *arr named on the queue row — otherwise NZBGet id `42` on one
+   host matches an unrelated NZB on another.
+4. ***arr → media server.** Both an id join and a path match, because running both is
+   what distinguishes "not scanned yet" from "wrong path mapping". Plex uses the stored
+   rating key; Jellyfin and Emby use `ProviderIds`.
 
 Full API details, including several places where the published documentation is wrong, are
 in [`docs/api-notes.md`](docs/api-notes.md).
@@ -220,7 +296,7 @@ Then add it to `RULES` in `core/rules/__init__.py`, in priority order.
 SLEUTHARR_CONFIG_DIR=./config SLEUTHARR_SCHEDULER=0 .venv/bin/python manage.py test core
 ```
 
-95 tests, no live calls — client parsing runs against recorded fixtures in
+147 tests, no live calls — client parsing runs against recorded fixtures in
 `core/tests/fixtures/`, and the ingestion tests use `httpx.MockTransport`. There are no
 test-only dependencies.
 
@@ -250,15 +326,14 @@ no JS build step. htmx is vendored, so the UI needs no outbound internet.
 
 ## Limitations
 
-- **Only qBittorrent** is implemented as a download client. Transmission and SABnzbd fit
-  behind the existing `DownloadClient` interface but are not written yet. Usenet downloads
-  will therefore diagnose from *arr queue data alone, without client-side progress.
-- **Plex only.** Jellyfin and Emby are supported by Seerr/Jellyseerr but not joined here.
 - **Season-level granularity for TV is coarse.** A partially-grabbed season is diagnosed
   from the series' history as a whole, not per episode.
+- **rTorrent/ruTorrent is not supported.** Its XML-RPC interface is different enough to
+  need its own client; the `DownloadClient` interface has room for it.
+- **Ombi's join is weaker than the Seerr family's** — see Supported services above.
 - **The Docker image has not been built in this environment** (no Docker daemon
   available), so the `Dockerfile` and `docker-entrypoint.sh` are unverified by execution.
-  Everything else — migrations, the poll cycle, all 95 tests, and every page under
+  Everything else — migrations, the poll cycle, all 147 tests, and every page under
   gunicorn — was run.
 - **No live upstream instance was available** during development. All API behaviour was
   verified against upstream OpenAPI schemas and source code rather than a running server;

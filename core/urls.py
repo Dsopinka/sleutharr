@@ -25,6 +25,8 @@ urlpatterns = [
         name="mapping_delete",
     ),
     path("settings/tunables/", views.tunables_save, name="tunables_save"),
+    path("request/<int:pk>/remove/", views.action_remove, name="action_remove"),
+    path("request/<int:pk>/search/", views.action_search, name="action_search"),
     path("poll/", views.run_poll_now, name="run_poll_now"),
     path("api/requests/", views.api_requests, name="api_requests"),
 ]

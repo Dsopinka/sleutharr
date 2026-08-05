@@ -310,3 +310,76 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   .kv { grid-template-columns: 1fr; }
   table { font-size: 12px; }
 }
+
+/* ------------------------------------------------------------------ actions */
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.panel-head strong { font-size: 13px; }
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.action-row:first-of-type { border-top: none; }
+.action-target { flex: 1; min-width: 0; }
+.action-title { font-size: 13px; word-break: break-word; }
+
+/* Destructive actions are visually distinct from ordinary navigation, so a delete is
+   never one misread button away from a link. */
+.btn-danger-solid {
+  background: #5c2b27;
+  border-color: #7a3a34;
+  color: #ffd9d4;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn-danger-solid:hover { background: #6f332e; border-color: var(--error); }
+
+.notice {
+  padding: 8px 11px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  margin-bottom: 10px;
+  border: 1px solid transparent;
+}
+.notice-ok { background: #1c3a2c; color: var(--ok); border-color: #2a5240; }
+.notice-error { background: #3d2220; color: var(--error); border-color: #5c3330; }
+
+.what-happens { margin-top: 10px; }
+.what-happens > summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.what-happens ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-dim); font-size: 12.5px; }
+.what-happens li { margin-bottom: 4px; }
+
+table.mini { margin-top: 8px; font-size: 12px; }
+table.mini td { padding: 5px 8px; }
+
+.subhead {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-faint);
+  margin: 18px 0 8px;
+  font-weight: 600;
+}
+
+/* Diagnosis messages quote upstream error text on its own line. */
+.verdict {
+  margin: 9px 0 0;
+  font-size: 14px;
+  white-space: pre-line;
+}
+/* The quoted upstream error, set apart from our own prose. */
+.verdict::first-line { font-weight: inherit; }

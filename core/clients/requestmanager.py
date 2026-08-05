@@ -142,6 +142,11 @@ class RequestManagerClient(BaseClient):
     variant: str = ServiceVariant.SEERR
     #: Human label used in messages and the settings UI.
     product: str = "Seerr"
+    #: Whether this product records which *arr record a request became. Ombi does not,
+    #: which changes what the "never added" diagnosis is entitled to claim.
+    links_to_arr_entity: bool = True
+    #: Whether this product has a separate 4K request lane.
+    has_4k_lane: bool = True
 
     def default_headers(self) -> dict[str, str]:
         return {**super().default_headers(), "X-Api-Key": self.service.api_key}
@@ -291,10 +296,149 @@ class JellyseerrClient(RequestManagerClient):
     product = "Jellyseerr"
 
 
+class OmbiClient(RequestManagerClient):
+    """Ombi v4.
+
+    A genuinely different API from the Seerr family, not a dialect of it: different
+    paths, a different auth header, .NET camelCase entities, no pagination, and -- most
+    importantly -- no record of which Sonarr/Radarr instance or record a request became.
+
+    That last point is a capability difference rather than a bug to work around. On Seerr
+    a null externalServiceId is strong evidence the push to the *arr failed; on Ombi the
+    field never existed, so the same absence means nothing. `links_to_arr_entity` tells
+    the rules which situation they are in so they do not overclaim.
+    """
+
+    variant = ServiceVariant.OMBI
+    product = "Ombi"
+    links_to_arr_entity = False
+    has_4k_lane = False
+
+    def default_headers(self) -> dict[str, str]:
+        # Ombi's header is `ApiKey`, capitalised exactly so.
+        return {
+            "Accept": "application/json",
+            "User-Agent": "Sleutharr",
+            "ApiKey": self.service.api_key,
+        }
+
+    def probe(self) -> ProbeResult:
+        data = self.get_json("/Status")
+        version = ""
+        if isinstance(data, dict):
+            version = str(data.get("version") or data.get("Version") or "")
+        return ProbeResult(ok=True, detail=f"Ombi {version}".strip(), version=version)
+
+    def iter_requests(
+        self, *, page_size: int = 50, filter_: str = "all", newest_first: bool = True
+    ) -> Iterator[NormalisedRequest]:
+        """Ombi returns whole unpaginated arrays, one endpoint per media type."""
+        for path, media_type in (
+            ("/Request/movie", MediaType.MOVIE),
+            ("/Request/tv", MediaType.TV),
+        ):
+            try:
+                rows = self.get_json(path)
+            except ServiceError as exc:
+                logger.warning("Ombi %s failed: %s", path, exc)
+                continue
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                parsed = self.parse_ombi_request(row, media_type)
+                if parsed is not None:
+                    yield parsed
+
+    def parse_ombi_request(
+        self, item: dict[str, Any], media_type: str
+    ) -> NormalisedRequest | None:
+        requested_at = _dt(item.get("requestedDate"))
+        if requested_at is None:
+            return None
+
+        user = item.get("requestedUser") or {}
+        user_label = (
+            item.get("requestedByAlias")
+            or user.get("userAlias")
+            or user.get("userName")
+            or user.get("emailAddress")
+            or ""
+        )
+
+        # Ombi carries booleans rather than a status enum.
+        if item.get("denied"):
+            state = RequestState.DECLINED
+        elif item.get("available"):
+            state = RequestState.COMPLETED
+        elif item.get("approved"):
+            state = RequestState.APPROVED
+        else:
+            state = RequestState.PENDING
+
+        availability = (
+            MediaAvailability.AVAILABLE
+            if item.get("available")
+            else MediaAvailability.PROCESSING
+            if item.get("approved")
+            else MediaAvailability.PENDING
+        )
+
+        seasons: list[int] = []
+        if media_type == MediaType.TV:
+            for child in item.get("childRequests") or [item]:
+                if not isinstance(child, dict):
+                    continue
+                for season in child.get("seasonRequests") or []:
+                    if isinstance(season, dict) and season.get("seasonNumber") is not None:
+                        seasons.append(int(season["seasonNumber"]))
+
+        year = None
+        release = item.get("releaseDate") or ""
+        if isinstance(release, str) and len(release) >= 4 and release[:4].isdigit():
+            year = int(release[:4])
+
+        return NormalisedRequest(
+            remote_id=int(item.get("id") or 0),
+            media_type=media_type,
+            requested_at=requested_at,
+            updated_at=_dt(item.get("markedAsAvailable"))
+            or _dt(item.get("markedAsApproved")),
+            requested_by=str(user_label)[:200],
+            request_state=state,
+            is_4k=False,
+            tmdb_id=item.get("theMovieDbId"),
+            tvdb_id=item.get("tvDbId"),
+            imdb_id=str(item.get("imdbId") or "")[:32],
+            # Every linkage field is absent on Ombi, so the *arr join always falls back
+            # to tmdb/tvdb and the media-server join is always path-based.
+            keys=ServiceKeys(
+                service_id=None,
+                external_service_id=None,
+                external_service_slug="",
+                rating_key="",
+                availability=availability,
+            ),
+            seasons=sorted(set(seasons)),
+            title=str(item.get("title") or "")[:500],
+            year=year,
+            raw=item,
+        )
+
+    def fetch_title(self, media_type: str, tmdb_id: int) -> tuple[str, int | None]:
+        # Ombi already includes the title on the request, so there is nothing to fetch.
+        return "", None
+
+    def request_url(self, tmdb_id: int | None, media_type: str) -> str:
+        return f"{self.service.url}/requests"
+
+
 CLIENT_BY_VARIANT: dict[str, type[RequestManagerClient]] = {
     ServiceVariant.SEERR: SeerrClient,
     ServiceVariant.OVERSEERR: OverseerrClient,
     ServiceVariant.JELLYSEERR: JellyseerrClient,
+    ServiceVariant.OMBI: OmbiClient,
 }
 
 

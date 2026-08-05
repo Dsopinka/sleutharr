@@ -13,7 +13,7 @@ from core.rules.r03_blocklist_loop import BlocklistLoop
 from core.rules.r04_downloaded_not_imported import DownloadedNotImported
 from core.rules.r05_grabbed_but_stalled import GrabbedButStalled
 from core.rules.r06_no_release_found import NoReleaseFound
-from core.rules.r07_imported_not_in_plex import ImportedNotInPlex
+from core.rules.r07_not_in_media_server import NotInMediaServer
 from core.rules.r08_wrong_quality import WrongQuality
 
 # Order matters: first match wins, so the most specific and most upstream causes come
@@ -25,7 +25,7 @@ RULES: list[Rule] = [
     BlocklistLoop(),
     DownloadedNotImported(),
     GrabbedButStalled(),
-    ImportedNotInPlex(),
+    NotInMediaServer(),
     WrongQuality(),
     NoReleaseFound(),
 ]

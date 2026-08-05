@@ -58,7 +58,7 @@ class NeverAdded(Rule):
                 f"quality profile, and that {service_name} is reachable from it), then "
                 f"retry the request."
             )
-        else:
+        elif ctx.request_manager_links_entities:
             message = (
                 f"Approved, but nothing matching it exists in {service_name} — "
                 f"searched by service id, TMDB id and TVDB id."
@@ -67,6 +67,19 @@ class NeverAdded(Rule):
                 f"Add the title to {service_name} manually, or delete and re-request it "
                 f"so the request manager pushes it again. Nothing will ever download "
                 f"while the library has no entry."
+            )
+        else:
+            # Ombi records no link between a request and the *arr record it became, so
+            # the only evidence available is the id lookup. Say what was actually
+            # checked rather than implying a hand-off failure we cannot observe.
+            message = (
+                f"Approved, but no entry with this TMDB/TVDB id exists in "
+                f"{service_name}. {ctx.request.service.name} does not record which "
+                f"library record a request became, so this is a best-effort id match."
+            )
+            next_step = (
+                f"Check {service_name} for the title under a different id or spelling. "
+                f"If it genuinely is not there, add it manually or re-request it."
             )
 
         return self.verdict(

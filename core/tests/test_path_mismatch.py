@@ -1,6 +1,6 @@
 """The full path-mismatch lifecycle: broken mapping -> user fixes it -> verdict clears.
 
-This is the loop the PLEX_PATH_MISMATCH diagnosis lives inside, and both ends of it have
+This is the loop the PATH_MISMATCH diagnosis lives inside, and both ends of it have
 failed in ways unit tests on either half alone would miss.
 """
 
@@ -12,8 +12,8 @@ import httpx
 from django.test import TestCase
 from django.utils import timezone
 
-from core.clients.plex import PlexClient
-from core.ingest.plex import sync_plex
+from core.clients.mediaserver import PlexClient
+from core.ingest.mediaserver import sync_media_servers
 from core.models import (
     EventType,
     PathMapping,
@@ -38,7 +38,7 @@ class PlexPathMismatchLifecycleTests(TestCase):
         )
         self.radarr = make_service(ServiceKind.RADARR, name="Radarr")
         self.plex = make_service(
-            ServiceKind.PLEX, name="Plex", base_url="http://plex:32400"
+            ServiceKind.MEDIA_SERVER, name="Plex", base_url="http://plex:32400"
         )
         self.request_ = TrackedRequest.objects.create(
             service=self.seerr,
@@ -49,7 +49,7 @@ class PlexPathMismatchLifecycleTests(TestCase):
             arr_service=self.radarr,
             arr_entity_id=412,
             arr_has_file=True,
-            plex_rating_key="20481",
+            media_server_item_id="20481",
         )
         TimelineEvent.objects.create(
             request=self.request_,
@@ -94,9 +94,9 @@ class PlexPathMismatchLifecycleTests(TestCase):
     def _sync(self):
         client = PlexClient(self.plex)
         with mock_client(client, self.handler), mock.patch(
-            "core.ingest.plex.PlexClient", return_value=client
+            "core.ingest.mediaserver.media_server_client", return_value=client
         ):
-            sync_plex()
+            sync_media_servers()
 
     def test_mismatch_then_fix_then_clear(self):
         # --- 1. No mapping configured. Plex has the file at /movies/..., the *arr
@@ -111,10 +111,10 @@ class PlexPathMismatchLifecycleTests(TestCase):
             ).exists()
         )
         diagnosis = diagnose_request(self.request_)
-        self.assertEqual(diagnosis.code, "PLEX_PATH_MISMATCH")
-        # The ratingKey join succeeded, so plex_found is True -- and the diagnosis must
+        self.assertEqual(diagnosis.code, "PATH_MISMATCH")
+        # The ratingKey join succeeded, so media_server_found is True -- and the diagnosis must
         # still fire despite that.
-        self.assertTrue(self.request_.plex_found)
+        self.assertTrue(self.request_.media_server_found)
 
         # --- 2. The user adds the mapping the timeline suggested.
         PathMapping.objects.create(
@@ -130,6 +130,6 @@ class PlexPathMismatchLifecycleTests(TestCase):
                 dedupe_key__endswith=":path_mismatch"
             ).exists()
         )
-        self.assertTrue(self.request_.plex_found)
-        self.assertEqual(self.request_.plex_matched_path, "/movies/Dune Part Two (2024)/Dune Part Two (2024) WEBDL-1080p.mkv")
+        self.assertTrue(self.request_.media_server_found)
+        self.assertEqual(self.request_.media_server_matched_path, "/movies/Dune Part Two (2024)/Dune Part Two (2024) WEBDL-1080p.mkv")
         self.assertIsNone(diagnose_request(self.request_))

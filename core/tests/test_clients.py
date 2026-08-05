@@ -10,7 +10,7 @@ from django.test import TestCase
 
 from core.clients.arr import RadarrClient, SonarrClient, canonical_event
 from core.clients.download import QBittorrentClient
-from core.clients.plex import PlexClient, match_paths, normalise_path, suggest_mapping
+from core.clients.mediaserver import PlexClient, match_paths, normalise_path, suggest_mapping
 from core.clients.requestmanager import (
     MEDIA_STATUS_BY_VARIANT,
     OverseerrClient,
@@ -210,11 +210,11 @@ class QBittorrentParsingTests(TestCase):
         """*arr downloadIds are uppercase; qBittorrent hashes are lowercase."""
         rows = load("qbittorrent_torrents.json")
         parsed = QBittorrentClient._parse(rows[0])
-        self.assertEqual(parsed.hash, rows[0]["hash"])
-        self.assertEqual(parsed.hash, parsed.hash.lower())
+        self.assertEqual(parsed.download_id, rows[0]["hash"])
+        self.assertEqual(parsed.download_id, parsed.download_id.lower())
 
         arr_download_id = "A1B2C3D4E5F60718293A4B5C6D7E8F9012345678"
-        self.assertEqual(arr_download_id.lower(), parsed.hash)
+        self.assertEqual(arr_download_id.lower(), parsed.download_id)
 
     def test_zero_seeds_detected(self):
         parsed = QBittorrentClient._parse(load("qbittorrent_torrents.json")[0])
@@ -249,7 +249,7 @@ class PlexPathTests(TestCase):
         payload = load("plex_metadata.json")
         row = payload["MediaContainer"]["Metadata"][0]
         item = PlexClient._parse_item(row)
-        self.assertEqual(item.rating_key, "20481")
+        self.assertEqual(item.item_id, "20481")
         self.assertEqual(
             item.paths,
             ["/movies/Dune Part Two (2024)/Dune Part Two (2024) WEBDL-1080p.mkv"],

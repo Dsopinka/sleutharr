@@ -72,8 +72,22 @@ class Command(BaseCommand):
             "http://127.0.0.1:8081", version="5.0.3",
         )
         plex = self._service(
-            ServiceKind.PLEX, "Plex", ServiceVariant.NATIVE,
+            ServiceKind.MEDIA_SERVER, "Plex", ServiceVariant.PLEX,
             "http://127.0.0.1:32400", version="1.41.3",
+        )
+        self._service(
+            ServiceKind.MEDIA_SERVER, "Jellyfin", ServiceVariant.JELLYFIN,
+            "http://127.0.0.1:8096", version="10.10.3",
+        )
+        self._service(
+            ServiceKind.DOWNLOAD_CLIENT, "SABnzbd", ServiceVariant.SABNZBD,
+            "http://127.0.0.1:8082", version="4.4.1",
+            arr_client_name="SABnzbd",
+        )
+        self._service(
+            ServiceKind.DOWNLOAD_CLIENT, "NZBGet", ServiceVariant.NZBGET,
+            "http://127.0.0.1:6789", version="24.3",
+            arr_client_name="NZBGet",
         )
         # One service deliberately broken, so the Health page shows both states.
         self._service(
@@ -145,7 +159,14 @@ class Command(BaseCommand):
             "and the user running Radarr has the correct permissions to access this "
             "file/folder",
             ServiceKind.RADARR, radarr,
-            raw={"trackedDownloadState": "importBlocked", "downloadId": "C3D4" + "0" * 36},
+            raw={
+                "id": 6001,
+                "movieId": 631,
+                "title": "Anora.2024.1080p.WEB-DL-GROUP",
+                "trackedDownloadState": "importBlocked",
+                "downloadId": "C3D4" + "0" * 36,
+                "downloadClient": "qBittorrent",
+            },
         )
 
         # 5. imported, but the Plex path mapping does not resolve
@@ -166,13 +187,13 @@ class Command(BaseCommand):
                  "quality": {"quality": {"name": "WEBDL-1080p"}}},
         )
         self._event(
-            r, EventType.PLEX_AVAILABLE, now - timedelta(hours=1),
+            r, EventType.MEDIA_SERVER_AVAILABLE, now - timedelta(hours=1),
             "In Plex as 'Dune: Part Two', but no configured path mapping resolves to it",
             "The *arr reports:\n  /data/media/movies/Dune Part Two (2024)/"
             "Dune Part Two (2024) WEBDL-1080p.mkv\n\nPlex reports:\n"
             "  /mnt/movies/Dune Part Two (2024)/Dune Part Two (2024) WEBDL-1080p.mkv\n\n"
             "Add a path mapping: /data/media/movies -> /mnt/movies",
-            ServiceKind.PLEX, plex,
+            ServiceKind.MEDIA_SERVER, plex,
             dedupe_key="plex:demo:path_mismatch",
             raw={
                 "ratingKey": "20481",
@@ -186,7 +207,7 @@ class Command(BaseCommand):
         # 6. wrong quality landed
         r = self._request(
             seerr, "The Substance", 2024, MediaType.MOVIE, "carol", 40,
-            arr_service=radarr, entity_id=655, has_file=True, plex_found=True,
+            arr_service=radarr, entity_id=655, has_file=True, media_server_found=True,
         )
         self._event(
             r, EventType.IMPORTED, now - timedelta(days=39),
@@ -239,7 +260,7 @@ class Command(BaseCommand):
         self._request(
             seerr, "Alien: Romulus", 2024, MediaType.MOVIE, "bob", 60,
             arr_service=radarr4k, entity_id=77, is_4k=True, has_file=True,
-            availability=MediaAvailability.AVAILABLE, plex_found=True,
+            availability=MediaAvailability.AVAILABLE, media_server_found=True,
         )
 
         for tracked in TrackedRequest.objects.all():
@@ -255,7 +276,7 @@ class Command(BaseCommand):
     # -- helpers ---------------------------------------------------------------
 
     def _service(self, kind, name, variant, url, *, version="", healthy=True,
-                 remote_service_id=None, is_4k=False):
+                 remote_service_id=None, is_4k=False, arr_client_name=""):
         now = timezone.now()
         service, _ = ServiceInstance.objects.update_or_create(
             name=DEMO_PREFIX + name,
@@ -263,6 +284,7 @@ class Command(BaseCommand):
                 "kind": kind, "variant": variant, "base_url": url,
                 "api_key": "demo", "version": version,
                 "remote_service_id": remote_service_id, "is_4k": is_4k,
+                "arr_client_name": arr_client_name,
                 "last_seen_ok": now if healthy else None,
                 "last_attempt_at": now,
                 "consecutive_failures": 0 if healthy else 4,
@@ -275,7 +297,7 @@ class Command(BaseCommand):
     def _request(self, service, title, year, media_type, user, days_ago, *,
                  arr_service=None, entity_id=None, monitored=True, has_file=False,
                  state=RequestState.APPROVED, availability=MediaAvailability.PROCESSING,
-                 snapshot=None, seasons=None, is_4k=False, plex_found=None):
+                 snapshot=None, seasons=None, is_4k=False, media_server_found=None):
         now = timezone.now()
         tracked, _ = TrackedRequest.objects.update_or_create(
             service=service,
@@ -292,11 +314,15 @@ class Command(BaseCommand):
                 "arr_quality_profile_name": "HD-1080p",
                 "arr_snapshot": snapshot or {},
                 "requested_seasons": seasons or [],
-                "is_4k": is_4k, "plex_found": plex_found,
+                "is_4k": is_4k, "media_server_found": media_server_found,
                 "tmdb_id": _stable_id(title) % 900000,
                 "last_polled": now,
             },
         )
+        # Event dedupe keys are derived from timestamps that shift on every run, so a
+        # reseed would otherwise stack duplicate timelines. Clearing first keeps the
+        # command idempotent.
+        tracked.events.all().delete()
         return tracked
 
     def _event(self, request, event_type, when, summary, detail, source_kind,

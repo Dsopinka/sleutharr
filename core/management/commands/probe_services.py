@@ -111,7 +111,7 @@ class Command(BaseCommand):
             first = next(iter(torrents.values()))
             return first.raw, f"{len(torrents)} torrents; sample {first.name[:40]!r}"
 
-        if service.kind == ServiceKind.PLEX:
+        if service.kind == ServiceKind.MEDIA_SERVER:
             sections = client.sections()
             note = "sections: " + ", ".join(
                 f"{s.get('title')}({s.get('type')})" for s in sections

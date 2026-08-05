@@ -11,9 +11,18 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
+from core.actions import (
+    ActionError,
+    describe_remove,
+    remove_from_queue,
+    search_enabled,
+    trigger_search,
+)
 from core.clients import ServiceError, client_for
 from core.models import (
+    ActionLog,
     AppSetting,
+    DEFAULT_FLAGS,
     DEFAULT_SETTINGS,
     Diagnosis,
     MediaAvailability,
@@ -24,6 +33,7 @@ from core.models import (
     Severity,
     TimelineEvent,
     TrackedRequest,
+    VARIANTS_BY_KIND,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 def _unfulfilled() -> "models.QuerySet[TrackedRequest]":
-    """Every request that has not landed in Plex yet.
+    """Every request that has not landed in the media server yet.
 
     The dashboard is the product: it answers "what did I ask for that never arrived",
     so fulfilled requests are excluded unless the user searches for them explicitly.
@@ -94,7 +104,7 @@ def request_detail(request, pk: int):
         (ServiceKind.RADARR if tracked.media_type == "movie" else ServiceKind.SONARR,
          "Radarr" if tracked.media_type == "movie" else "Sonarr"),
         (ServiceKind.DOWNLOAD_CLIENT, "Download"),
-        (ServiceKind.PLEX, "Plex"),
+        (ServiceKind.MEDIA_SERVER, "Media server"),
     ]
 
     for event in events:
@@ -109,6 +119,9 @@ def request_detail(request, pk: int):
             "events": events,
             "diagnosis": diagnosis,
             "lanes": lanes,
+            "remove": describe_remove(tracked),
+            "search_enabled": search_enabled(),
+            "actions": tracked.actions.all()[:10],
         },
     )
 
@@ -191,6 +204,8 @@ SERVICE_FIELDS = (
 
 def settings_page(request):
     tunables = {k: AppSetting.get(k, v) for k, v in DEFAULT_SETTINGS.items()}
+    flags = {k: AppSetting.get(k, v) for k, v in DEFAULT_FLAGS.items()}
+    labels = dict(ServiceVariant.choices)
     return render(
         request,
         "core/settings.html",
@@ -199,7 +214,15 @@ def settings_page(request):
             "mappings": PathMapping.objects.all(),
             "kinds": ServiceKind.choices,
             "variants": ServiceVariant.choices,
+            # Drives the form's dependent dropdown so a kind cannot be paired with a
+            # variant that makes no sense for it.
+            "variants_by_kind": {
+                kind: [{"value": v, "label": labels[v]} for v in variants]
+                for kind, variants in VARIANTS_BY_KIND.items()
+            },
             "tunables": tunables,
+            "flags": flags,
+            "recent_actions": ActionLog.objects.all()[:20],
         },
     )
 
@@ -216,6 +239,7 @@ def service_save(request, pk: int | None = None):
     service.enabled = request.POST.get("enabled") == "on"
     service.verify_tls = request.POST.get("verify_tls") == "on"
     service.is_4k = request.POST.get("is_4k") == "on"
+    service.arr_client_name = (request.POST.get("arr_client_name") or "").strip()[:120]
 
     # Blank secrets mean "unchanged" -- the form renders them masked, so submitting the
     # form must not wipe a working key.
@@ -283,7 +307,65 @@ def tunables_save(request):
         except ValueError:
             continue
         AppSetting.set(key, value)
+    # Checkboxes are absent from the POST when unticked, so every flag is written on
+    # every save rather than only the ones present.
+    for key in DEFAULT_FLAGS:
+        AppSetting.set(key, request.POST.get(key) == "on")
     return redirect("settings")
+
+
+# ----------------------------------------------------------------------------- actions
+
+
+@require_POST
+def action_remove(request, pk: int):
+    """Remove a queue item. Destructive, so it is POST-only and confirmed in the UI."""
+    tracked = get_object_or_404(TrackedRequest, pk=pk)
+    try:
+        queue_id = int(request.POST.get("queue_id") or 0)
+    except ValueError:
+        queue_id = 0
+    if not queue_id:
+        return _action_result(request, tracked, error="No queue item was selected.")
+
+    try:
+        entry = remove_from_queue(tracked, queue_id)
+    except ActionError as exc:
+        return _action_result(request, tracked, error=str(exc))
+    return _action_result(request, tracked, message=entry.detail)
+
+
+@require_POST
+def action_search(request, pk: int):
+    tracked = get_object_or_404(TrackedRequest, pk=pk)
+    try:
+        entry = trigger_search(tracked)
+    except ActionError as exc:
+        return _action_result(request, tracked, error=str(exc))
+    return _action_result(request, tracked, message=entry.detail)
+
+
+def _action_result(request, tracked, *, message: str = "", error: str = ""):
+    """Re-render the action panel in place, or fall back to a redirect."""
+    from core.rules.engine import diagnose_request
+
+    if message:
+        # The verdict was derived from state we just changed; recompute it now rather
+        # than leaving a stale diagnosis on screen until the next poll.
+        diagnose_request(tracked)
+        tracked.refresh_from_db()
+
+    context = {
+        "tracked": tracked,
+        "remove": describe_remove(tracked),
+        "search_enabled": search_enabled(),
+        "action_message": message,
+        "action_error": error,
+        "actions": tracked.actions.all()[:10],
+    }
+    if request.headers.get("HX-Request"):
+        return render(request, "core/_actions.html", context)
+    return redirect("request_detail", pk=tracked.pk)
 
 
 @require_POST

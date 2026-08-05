@@ -12,11 +12,16 @@
   <Overview>
     Sleutharr answers one question: "I requested this - where did it die?"
 
-    It stitches a single request into one timeline across Seerr/Overseerr/Jellyseerr,
-    Sonarr/Radarr, your download client and Plex, then tells you where the chain broke
-    and what to do about it.
+    It stitches a single request into one timeline across your request manager,
+    Sonarr/Radarr, your download client and your media server, then tells you where the
+    chain broke and what to do about it.
 
-    Read-only: Sleutharr never writes to any *arr app, download client or Plex.
+    Supports Seerr, Overseerr, Jellyseerr and Ombi; Sonarr and Radarr (any number of
+    instances, including 4K splits); qBittorrent, Transmission, Deluge, SABnzbd and
+    NZBGet; and Plex, Jellyfin and Emby.
+
+    Read-only by default. The one exception is a "remove and blocklist" button for stuck
+    downloads, which always asks for confirmation and never runs automatically.
 
     All service URLs and API keys are configured in the web UI, not through environment
     variables. Add your services on the Settings page after first start.

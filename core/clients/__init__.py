@@ -15,10 +15,15 @@ __all__ = [
 
 
 def client_for(service) -> BaseClient:
-    """Build the appropriate client for any configured service."""
+    """Build the appropriate client for any configured service.
+
+    Dispatch is on kind then variant: the kind decides the role in the chain, the variant
+    decides the product. Rules only ever see kinds, so adding a product never reaches the
+    diagnosis layer.
+    """
     from core.clients.arr import arr_client
     from core.clients.download import download_client
-    from core.clients.plex import PlexClient
+    from core.clients.mediaserver import media_server_client
     from core.clients.requestmanager import request_manager_client
 
     if service.kind == ServiceKind.REQUEST_MANAGER:
@@ -27,6 +32,6 @@ def client_for(service) -> BaseClient:
         return arr_client(service)
     if service.kind == ServiceKind.DOWNLOAD_CLIENT:
         return download_client(service)
-    if service.kind == ServiceKind.PLEX:
-        return PlexClient(service)
+    if service.kind == ServiceKind.MEDIA_SERVER:
+        return media_server_client(service)
     raise ValueError(f"No client for service kind {service.kind!r}")

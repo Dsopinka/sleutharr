@@ -13,7 +13,8 @@
 {% if diagnosis %}
 <div class="panel panel-{{ diagnosis.severity }}">
   <span class="badge badge-{{ diagnosis.severity }}">{{ diagnosis.code }}</span>
-  <p style="margin:9px 0 0;font-size:14px">{{ diagnosis.message }}</p>
+  {# .verdict is white-space:pre-line so quoted upstream errors keep their own line. #}
+  <p class="verdict">{{ diagnosis.message }}</p>
   {% if diagnosis.next_step %}
   <div class="next-step">
     <strong>Next step</strong>
@@ -39,6 +40,8 @@
   </p>
 </div>
 {% endif %}
+
+{% include "core/_actions.html" %}
 
 <h2>Facts</h2>
 <div class="panel">
@@ -67,11 +70,11 @@
     {% if tracked.arr_quality_profile_name %}
       <dt>Quality profile</dt><dd>{{ tracked.arr_quality_profile_name }}</dd>
     {% endif %}
-    <dt>In Plex</dt>
+    <dt>In media server</dt>
     <dd>
-      {% if tracked.plex_found %}yes
-        {% if tracked.plex_matched_path %}<div class="path">{{ tracked.plex_matched_path }}</div>{% endif %}
-      {% elif tracked.plex_found is False %}<span style="color:var(--warning)">no</span>
+      {% if tracked.media_server_found %}yes
+        {% if tracked.media_server_matched_path %}<div class="path">{{ tracked.media_server_matched_path }}</div>{% endif %}
+      {% elif tracked.media_server_found is False %}<span style="color:var(--warning)">no</span>
       {% else %}&mdash;{% endif %}
     </dd>
     <dt>Last polled</dt>

@@ -326,49 +326,49 @@ class GrabbedButStalledTests(RuleTestCase):
         self.assertNotEqual(getattr(verdict, "code", None), "GRABBED_BUT_STALLED")
 
 
-class ImportedNotInPlexTests(RuleTestCase):
+class NotInMediaServerTests(RuleTestCase):
     def test_imported_but_absent_after_grace_fires(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        request.plex_found = False
+        request.media_server_found = False
         request.save()
         add_event(request, EventType.IMPORTED, hours_ago=6, raw={})
         add_event(
             request,
-            EventType.PLEX_MISSING,
+            EventType.MEDIA_SERVER_MISSING,
             hours_ago=0.1,
-            source_kind=ServiceKind.PLEX,
+            source_kind=ServiceKind.MEDIA_SERVER,
             raw={"arrPaths": ["/data/media/movies/X/X.mkv"]},
         )
         verdict = self.verdict_for(request)
-        self.assertEqual(verdict.code, "IMPORTED_NOT_IN_PLEX")
+        self.assertEqual(verdict.code, "NOT_IN_MEDIA_SERVER")
 
     def test_within_grace_period_does_not_fire(self):
         """Plex scans on its own schedule; a fresh import is not a fault."""
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        request.plex_found = False
+        request.media_server_found = False
         request.save()
         add_event(request, EventType.IMPORTED, hours_ago=0.2, raw={})
         verdict = self.verdict_for(request)
         self.assertIsNone(verdict)
 
-    def test_path_mismatch_fires_even_though_plex_found_is_true(self):
-        """Regression: the mismatch branch must not sit behind the plex_found guard.
+    def test_path_mismatch_fires_even_though_media_server_found_is_true(self):
+        """Regression: the mismatch branch must not sit behind the media_server_found guard.
 
-        The ingester sets plex_found=True whenever *either* join succeeds, and in the
-        mismatch case the ratingKey join does succeed. An early `if plex_found: return`
+        The ingester sets media_server_found=True whenever *either* join succeeds, and in the
+        mismatch case the ratingKey join does succeed. An early `if media_server_found: return`
         therefore made this diagnosis unreachable in production while still passing a
-        test that set plex_found=False by hand.
+        test that set media_server_found=False by hand.
         """
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        request.plex_found = True
-        request.plex_rating_key = "20481"
+        request.media_server_found = True
+        request.media_server_item_id = "20481"
         request.save()
         add_event(request, EventType.IMPORTED, hours_ago=10, raw={})
         add_event(
             request,
-            EventType.PLEX_AVAILABLE,
+            EventType.MEDIA_SERVER_AVAILABLE,
             hours_ago=0.1,
-            source_kind=ServiceKind.PLEX,
+            source_kind=ServiceKind.MEDIA_SERVER,
             dedupe_key="plex:1:path_mismatch",
             raw={
                 "arrPaths": ["/data/media/movies/X/X.mkv"],
@@ -376,19 +376,19 @@ class ImportedNotInPlexTests(RuleTestCase):
             },
         )
         verdict = self.verdict_for(request)
-        self.assertEqual(verdict.code, "PLEX_PATH_MISMATCH")
+        self.assertEqual(verdict.code, "PATH_MISMATCH")
 
     def test_path_mismatch_is_a_separate_diagnosis(self):
         """Plex has it, but our mapping does not resolve -- a different fix entirely."""
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        request.plex_found = False
+        request.media_server_found = False
         request.save()
         add_event(request, EventType.IMPORTED, hours_ago=10, raw={})
         add_event(
             request,
-            EventType.PLEX_AVAILABLE,
+            EventType.MEDIA_SERVER_AVAILABLE,
             hours_ago=0.1,
-            source_kind=ServiceKind.PLEX,
+            source_kind=ServiceKind.MEDIA_SERVER,
             dedupe_key="plex:1:path_mismatch",
             raw={
                 "arrPaths": ["/data/media/movies/X/X.mkv"],
@@ -396,22 +396,22 @@ class ImportedNotInPlexTests(RuleTestCase):
             },
         )
         verdict = self.verdict_for(request)
-        self.assertEqual(verdict.code, "PLEX_PATH_MISMATCH")
+        self.assertEqual(verdict.code, "PATH_MISMATCH")
         self.assertIn("/movies/X/X.mkv", verdict.message)
 
     def test_found_in_plex_does_not_fire(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        request.plex_found = True
+        request.media_server_found = True
         request.save()
         add_event(request, EventType.IMPORTED, hours_ago=10, raw={})
         verdict = self.verdict_for(request)
-        self.assertNotEqual(getattr(verdict, "code", None), "IMPORTED_NOT_IN_PLEX")
+        self.assertNotEqual(getattr(verdict, "code", None), "NOT_IN_MEDIA_SERVER")
 
 
 class WrongQualityTests(RuleTestCase):
     def test_below_cutoff_fires(self):
         request = make_request(service=self.seerr, arr_service=self.radarr, has_file=True)
-        request.plex_found = True
+        request.media_server_found = True
         request.save()
         add_event(
             request,
@@ -429,7 +429,7 @@ class WrongQualityTests(RuleTestCase):
 
     def test_cutoff_met_does_not_fire(self):
         request = make_request(service=self.seerr, arr_service=self.radarr, has_file=True)
-        request.plex_found = True
+        request.media_server_found = True
         request.save()
         add_event(
             request,

@@ -50,12 +50,25 @@ def _lock_for(service_id: int) -> threading.Lock:
 
 
 class ServiceError(Exception):
-    """Any failure talking to an upstream service."""
+    """Any failure talking to an upstream service.
 
-    def __init__(self, message: str, *, status: int | None = None, retryable: bool = True):
+    The originating response is carried because some protocols answer with an error
+    status that is really part of the handshake -- Transmission's 409 hands back the
+    session id the next request must use.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        retryable: bool = True,
+        response: "httpx.Response | None" = None,
+    ):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+        self.response = response
 
 
 class AuthError(ServiceError):
@@ -152,6 +165,7 @@ class BaseClient:
                             f"{response.text[:200]}",
                             status=response.status_code,
                             retryable=False,
+                            response=response,
                         )
                     else:
                         return response

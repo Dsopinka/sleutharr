@@ -124,7 +124,122 @@
       </div>
       {% endfor %}
     </div>
-    <button class="btn" type="submit">Save thresholds</button>
+
+    <h3 class="subhead">Actions</h3>
+    <div class="checkrow">
+      <label>
+        <input type="checkbox" name="enable_search_action"
+               {% if flags.enable_search_action %}checked{% endif %}>
+        Show a "search again" button
+      </label>
+    </div>
+    <p class="hint" style="margin-top:0">
+      Usually unnecessary. Removing a queue item already blocklists the release, which
+      makes Sonarr/Radarr search for a replacement on their own. This is for the case
+      where nothing was ever grabbed at all.
+    </p>
+
+    <button class="btn" type="submit" style="margin-top:12px">Save</button>
   </form>
 </div>
+
+<h2>Action history</h2>
+<div class="panel">
+  <p class="hint" style="margin-top:0">
+    Sleutharr is read-only except for queue removals, which are always confirmed by hand
+    and never run automatically. Every one is recorded here.
+  </p>
+  {% if recent_actions %}
+  <table>
+    <thead><tr><th>When</th><th>Request</th><th>Action</th><th>Service</th><th>Result</th></tr></thead>
+    <tbody>
+      {% for entry in recent_actions %}
+      <tr>
+        <td class="nowrap hint">{{ entry.performed_at|date:"j M Y H:i" }}</td>
+        <td>{{ entry.request_title }}</td>
+        <td class="mono">{{ entry.action }}</td>
+        <td>{{ entry.target_service }}</td>
+        <td>
+          <span class="badge badge-{% if entry.status == 'success' %}ok{% else %}error{% endif %}">
+            {{ entry.get_status_display }}
+          </span>
+          <div class="hint">{{ entry.detail|default:entry.error }}</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="hint">Nothing yet. Sleutharr has not written to any service.</p>
+  {% endif %}
+</div>
+
+{{ variants_by_kind|json_script:"variants-by-kind" }}
+<script>
+// Keep the product dropdown consistent with the selected kind, and hide fields that do
+// not apply. Purely a convenience -- the server does not depend on it.
+(function () {
+  var byKind = JSON.parse(document.getElementById('variants-by-kind').textContent);
+
+  function sync(form) {
+    var kindSel = form.querySelector('.js-kind');
+    var variantSel = form.querySelector('.js-variant');
+    if (!kindSel || !variantSel) return;
+    var kind = kindSel.value;
+    var allowed = byKind[kind] || [];
+    var current = variantSel.getAttribute('data-current') || variantSel.value;
+
+    variantSel.innerHTML = '';
+    allowed.forEach(function (opt) {
+      var o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === current) o.selected = true;
+      variantSel.appendChild(o);
+    });
+    if (!allowed.length) {
+      var o = document.createElement('option');
+      o.value = 'native'; o.textContent = 'Native';
+      variantSel.appendChild(o);
+    }
+
+    var variant = variantSel.value;
+    var isArr = kind === 'sonarr' || kind === 'radarr';
+    var isClient = kind === 'download_client';
+    var usesUserPass = ['qbittorrent', 'transmission', 'nzbget'].indexOf(variant) >= 0;
+    var usesPasswordOnly = variant === 'deluge';
+    var usesApiKey = !isClient || ['sabnzbd'].indexOf(variant) >= 0;
+
+    show(form, '.js-field-arr', isArr);
+    show(form, '.js-field-4k', isArr);
+    show(form, '.js-field-client', isClient);
+    show(form, '.js-field-username', isClient && usesUserPass);
+    show(form, '.js-field-password', isClient && (usesUserPass || usesPasswordOnly));
+    show(form, '.js-field-apikey', usesApiKey);
+
+    var hint = form.querySelector('.js-hint-apikey');
+    if (hint) {
+      hint.textContent = kind === 'media_server'
+        ? (variant === 'plex' ? 'Plex: X-Plex-Token.' : 'Jellyfin/Emby: an API key from Dashboard → API Keys.')
+        : (variant === 'ombi' ? 'Ombi: the API key from Settings → Configuration.' : '');
+    }
+  }
+
+  function show(form, selector, visible) {
+    form.querySelectorAll(selector).forEach(function (el) {
+      el.style.display = visible ? '' : 'none';
+    });
+  }
+
+  document.querySelectorAll('form').forEach(function (form) {
+    if (!form.querySelector('.js-kind')) return;
+    sync(form);
+    form.querySelector('.js-kind').addEventListener('change', function () {
+      form.querySelector('.js-variant').removeAttribute('data-current');
+      sync(form);
+    });
+    form.querySelector('.js-variant').addEventListener('change', function () { sync(form); });
+  });
+})();
+</script>
 {% endblock %}

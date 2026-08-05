@@ -19,8 +19,8 @@ from core.models import EventType, Severity
 from core.rules.base import Rule, RuleContext, Verdict
 
 
-class ImportedNotInPlex(Rule):
-    code = "IMPORTED_NOT_IN_PLEX"
+class NotInMediaServer(Rule):
+    code = "NOT_IN_MEDIA_SERVER"
     severity = Severity.WARNING
 
     def evaluate(self, ctx: RuleContext) -> Verdict | None:
@@ -30,16 +30,16 @@ class ImportedNotInPlex(Rule):
         if imported is None and not request.arr_has_file:
             return None
 
-        # A path mismatch is recorded as PLEX_AVAILABLE with a mismatch dedupe key: Plex
+        # A path mismatch is recorded as MEDIA_SERVER_AVAILABLE with a mismatch dedupe key: Plex
         # has the item, our mapping just does not reach it.
         #
-        # This is checked *before* the plex_found short-circuit on purpose. The ingester
-        # sets plex_found=True whenever either join succeeds, and in the mismatch case
-        # the ratingKey join does succeed -- so returning early on plex_found would make
+        # This is checked *before* the media_server_found short-circuit on purpose. The ingester
+        # sets media_server_found=True whenever either join succeeds, and in the mismatch case
+        # the ratingKey join does succeed -- so returning early on media_server_found would make
         # this branch unreachable and silently disable the diagnosis.
         mismatches = [
             e
-            for e in ctx.of_type(EventType.PLEX_AVAILABLE)
+            for e in ctx.of_type(EventType.MEDIA_SERVER_AVAILABLE)
             if e.dedupe_key.endswith(":path_mismatch")
         ]
         if mismatches:
@@ -68,13 +68,13 @@ class ImportedNotInPlex(Rule):
                 link=(reverse("settings"), "Path mappings"),
                 evidence=[latest, imported] if imported else [latest],
                 severity=Severity.WARNING,
-                code="PLEX_PATH_MISMATCH",
+                code="PATH_MISMATCH",
             )
 
-        if request.plex_found:
+        if request.media_server_found:
             return None
 
-        missing = ctx.of_type(EventType.PLEX_MISSING)
+        missing = ctx.of_type(EventType.MEDIA_SERVER_MISSING)
         grace_minutes = float(ctx.setting("plex_grace_minutes") or 60)
 
         if imported is not None:
@@ -110,6 +110,6 @@ class ImportedNotInPlex(Rule):
                 "the imported file, and that Plex has read permission on it. If the file "
                 "is there, add a path mapping on the Settings page."
             ),
-            link=ctx.plex_url(),
+            link=ctx.media_server_url(),
             evidence=[e for e in [imported, *missing[-1:]] if e],
         )

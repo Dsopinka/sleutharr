@@ -37,7 +37,7 @@ def run_poll_cycle() -> None:
     """Run one full cycle. Never raises."""
     from core.ingest.arr import sync_arr_entities, sync_arr_history, sync_arr_queues
     from core.ingest.download import sync_download_clients
-    from core.ingest.plex import sync_plex
+    from core.ingest.mediaserver import sync_media_servers
     from core.ingest.requests import sync_requests
     from core.rules.engine import diagnose_all
 
@@ -47,7 +47,7 @@ def run_poll_cycle() -> None:
         ("arr history", sync_arr_history),
         ("arr queues", sync_arr_queues),
         ("download clients", sync_download_clients),
-        ("plex", sync_plex),
+        ("media servers", sync_media_servers),
         ("diagnosis", diagnose_all),
     )
 

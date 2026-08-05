@@ -1,0 +1,84 @@
+{# Remediation panel. Every action is POST + explicit confirm; nothing runs unattended. #}
+<div id="actions" class="panel">
+  <div class="panel-head">
+    <strong>Fix it</strong>
+    <span class="hint">Sleutharr is read-only apart from these. Nothing happens automatically.</span>
+  </div>
+
+  {% if action_message %}
+    <div class="notice notice-ok">{{ action_message }}</div>
+  {% endif %}
+  {% if action_error %}
+    <div class="notice notice-error">{{ action_error }}</div>
+  {% endif %}
+
+  {% if remove.can_act %}
+    {% for target in remove.targets %}
+    <form method="post" action="{% url 'action_remove' tracked.pk %}"
+          hx-post="{% url 'action_remove' tracked.pk %}"
+          hx-target="#actions" hx-swap="outerHTML"
+          {# Plain autoescaping, not escapejs: escapejs would mangle hyphens in this attribute. #}
+          hx-confirm="Remove “{{ target.label }}” from {{ remove.service_name }}?&#10;&#10;This deletes the downloaded files from the download client and blocklists the release so it will not be grabbed again. {{ remove.service_name }} will then search for a different release.&#10;&#10;This cannot be undone."
+          class="action-row">
+      {% csrf_token %}
+      <input type="hidden" name="queue_id" value="{{ target.queue_id }}">
+      <div class="action-target">
+        <div class="action-title">{{ target.label }}</div>
+        <div class="hint">
+          {{ remove.service_name }} queue #{{ target.queue_id }}
+          {% if target.state %} &middot; {{ target.state }}{% endif %}
+        </div>
+      </div>
+      <button class="btn btn-danger-solid" type="submit">Remove &amp; blocklist</button>
+    </form>
+    {% endfor %}
+
+    <details class="what-happens">
+      <summary>What this does</summary>
+      <ul>
+        {% for effect in remove.effects %}<li>{{ effect }}</li>{% endfor %}
+      </ul>
+      <p class="hint">
+        The removal is sent to {{ remove.service_name }}, not straight to the download
+        client, so the *arr stays consistent with its own queue and history.
+      </p>
+    </details>
+  {% else %}
+    <p class="hint" style="margin:6px 0 0">{{ remove.reason }}</p>
+  {% endif %}
+
+  {% if search_enabled and tracked.arr_entity_id %}
+    <form method="post" action="{% url 'action_search' tracked.pk %}"
+          hx-post="{% url 'action_search' tracked.pk %}"
+          hx-target="#actions" hx-swap="outerHTML"
+          class="action-row">
+      {% csrf_token %}
+      <div class="action-target">
+        <div class="action-title">Search again</div>
+        <div class="hint">Asks the *arr to look for releases now.</div>
+      </div>
+      <button class="btn" type="submit">Search</button>
+    </form>
+  {% endif %}
+
+  {% if actions %}
+  <details class="what-happens">
+    <summary>Action history ({{ actions|length }})</summary>
+    <table class="mini">
+      <tbody>
+        {% for entry in actions %}
+        <tr>
+          <td class="nowrap hint">{{ entry.performed_at|date:"j M H:i" }}</td>
+          <td>
+            <span class="badge badge-{% if entry.status == 'success' %}ok{% else %}error{% endif %}">
+              {{ entry.get_status_display }}
+            </span>
+          </td>
+          <td>{{ entry.detail|default:entry.error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+</div>

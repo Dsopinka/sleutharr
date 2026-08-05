@@ -1,9 +1,12 @@
-"""Plex ingestion and the path join.
+"""Media server ingestion and the path join (Plex, Jellyfin, Emby).
 
-Both join paths run, and running both is the point. The ratingKey tells us whether Plex
-has the item at all; the path match tells us whether our path mapping is correct. The
-combination is what separates "Plex has not scanned yet" from "your path mapping is
-wrong" -- two situations with identical symptoms and completely different fixes.
+Both join paths run, and running both is the point. The server-native id tells us whether
+the server has the item at all; the path match tells us whether our path mapping is
+correct. The combination is what separates "the server has not scanned yet" from "your
+path mapping is wrong" -- identical symptoms, completely different fixes.
+
+The id join differs by product: Plex has a rating key stored by the request manager,
+while Jellyfin and Emby expose ProviderIds so we can match on tmdb/tvdb directly.
 """
 
 from __future__ import annotations
@@ -13,11 +16,12 @@ import logging
 from django.utils import timezone
 
 from core.clients.base import ServiceError
-from core.clients.plex import (
+from core.clients.mediaserver import (
+    MediaItem,
+    MediaServerClient,
     PathMatchResult,
-    PlexClient,
-    PlexItem,
     match_paths,
+    media_server_client,
     suggest_mapping,
 )
 from core.ingest.events import clear_events, record_event
@@ -61,10 +65,10 @@ def imported_paths(tracked: TrackedRequest) -> list[str]:
     return paths
 
 
-def sync_plex() -> None:
+def sync_media_servers() -> None:
     services = [
         s
-        for s in ServiceInstance.objects.filter(enabled=True, kind=ServiceKind.PLEX)
+        for s in ServiceInstance.objects.filter(enabled=True, kind=ServiceKind.MEDIA_SERVER)
         if not s.is_backed_off()
     ]
     if not services:
@@ -79,7 +83,7 @@ def sync_plex() -> None:
     candidates = [
         t
         for t in candidates
-        if t.plex_rating_key or t.arr_has_file or imported_paths(t)
+        if t.media_server_item_id or t.arr_has_file or imported_paths(t)
     ]
     if not candidates:
         return
@@ -87,7 +91,7 @@ def sync_plex() -> None:
     mappings = list(PathMapping.objects.all())
 
     for service in services:
-        client = PlexClient(service)
+        client = media_server_client(service)
         try:
             with client:
                 index = client.build_path_index()
@@ -105,86 +109,119 @@ def sync_plex() -> None:
             client.close()
 
 
+
+def _find_by_id(
+    client: MediaServerClient,
+    tracked: TrackedRequest,
+    index: dict[str, MediaItem],
+) -> MediaItem | None:
+    """Locate the item by a server-native identifier rather than by path.
+
+    Plex: the rating key the request manager stored.
+    Jellyfin/Emby: ProviderIds on the item, which map straight to tmdb/tvdb.
+
+    This is deliberately independent of the path join -- when this succeeds and the path
+    join fails, the file is present and the path mapping is what is wrong.
+    """
+    if tracked.media_server_item_id:
+        found = client.item(tracked.media_server_item_id)
+        if found is not None:
+            return found
+
+    # Jellyfin/Emby expose provider ids, so we can match without any stored id at all.
+    if tracked.tmdb_id or tracked.tvdb_id:
+        for item in index.values():
+            if tracked.tmdb_id and item.tmdb_id == tracked.tmdb_id:
+                return item
+            if tracked.tvdb_id and item.tvdb_id == tracked.tvdb_id:
+                return item
+    return None
+
+
 def _check_request(
-    client: PlexClient,
+    client: MediaServerClient,
     service: ServiceInstance,
     tracked: TrackedRequest,
-    index: dict[str, PlexItem],
+    index: dict[str, MediaItem],
     mappings: list[PathMapping],
 ) -> None:
     now = timezone.now()
+    product = client.product
 
-    # Path 1: the rating key the request manager recorded.
-    by_rating_key: PlexItem | None = None
-    if tracked.plex_rating_key:
-        by_rating_key = client.item(tracked.plex_rating_key)
+    # Join 1: server-native id.
+    by_id = _find_by_id(client, tracked, index)
 
-    # Path 2: translate the *arr's paths and look them up.
+    # Join 2: translate the *arr's paths and look them up.
     arr_paths = imported_paths(tracked)
     match: PathMatchResult = match_paths(arr_paths, index, mappings)
 
-    found = bool(by_rating_key or match.found)
-    tracked.plex_found = found
-    tracked.plex_matched_path = match.matched_path or ""
-    if by_rating_key and not tracked.plex_rating_key:
-        tracked.plex_rating_key = by_rating_key.rating_key
+    tracked.media_server_found = bool(by_id or match.found)
+    tracked.media_server_matched_path = match.matched_path or ""
+    if by_id and not tracked.media_server_item_id:
+        tracked.media_server_item_id = by_id.item_id
     tracked.save(
-        update_fields=["plex_found", "plex_matched_path", "plex_rating_key"]
+        update_fields=[
+            "media_server_found",
+            "media_server_matched_path",
+            "media_server_item_id",
+        ]
     )
+
+    scope = f"mediaserver:{service.pk}"
 
     if match.found and match.item is not None:
         # The path now resolves, so any earlier mismatch/missing verdict is stale. These
         # are the events the rules read, so leaving them would keep reporting a problem
         # the user has already fixed.
-        clear_events(tracked, f"plex:{service.pk}:path_mismatch")
-        clear_events(tracked, f"plex:{service.pk}:missing")
+        clear_events(tracked, f"{scope}:path_mismatch")
+        clear_events(tracked, f"{scope}:missing")
         record_event(
             tracked,
             service=service,
-            source_kind=ServiceKind.PLEX,
-            event_type=EventType.PLEX_AVAILABLE,
+            source_kind=ServiceKind.MEDIA_SERVER,
+            event_type=EventType.MEDIA_SERVER_AVAILABLE,
             occurred_at=now,
-            summary=f"Present in Plex: {match.item.title}",
+            summary=f"Present in {product}: {match.item.title}",
             detail=f"Matched path: {match.matched_path}",
-            dedupe_key=f"plex:{service.pk}:found",
+            dedupe_key=f"{scope}:found",
             raw=match.item.raw,
             update_existing=True,
         )
         return
 
-    if by_rating_key is not None:
-        # Plex has the item, but none of the translated *arr paths matched a Plex part.
-        # That is a path-mapping problem, not a missing file -- and we can usually name
-        # the exact prefix pair that would fix it.
-        detail = _mapping_detail(arr_paths, match, by_rating_key)
+    if by_id is not None:
+        # The server has the item, but none of the translated *arr paths matched any of
+        # its files. That is a path-mapping problem, not a missing file -- and we can
+        # usually name the exact prefix pair that would fix it.
         record_event(
             tracked,
             service=service,
-            source_kind=ServiceKind.PLEX,
-            event_type=EventType.PLEX_AVAILABLE,
+            source_kind=ServiceKind.MEDIA_SERVER,
+            event_type=EventType.MEDIA_SERVER_AVAILABLE,
             occurred_at=now,
             summary=(
-                f"In Plex as '{by_rating_key.title}', but no configured path mapping "
+                f"In {product} as '{by_id.title}', but no configured path mapping "
                 "resolves to it"
             ),
-            detail=detail,
-            dedupe_key=f"plex:{service.pk}:path_mismatch",
+            detail=_mapping_detail(arr_paths, match, by_id, product),
+            dedupe_key=f"{scope}:path_mismatch",
             raw={
-                "ratingKey": by_rating_key.rating_key,
-                "plexPaths": by_rating_key.paths,
+                "itemId": by_id.item_id,
+                "serverPaths": by_id.paths,
                 "arrPaths": arr_paths,
                 "attempted": match.attempted,
                 "basenameCandidate": match.basename_candidate,
+                "product": product,
             },
             update_existing=True,
         )
         return
 
     if arr_paths:
-        detail = "Looked for:\n" + "\n".join(match.attempted)
+        detail = "Looked for:\n  " + "\n  ".join(match.attempted)
         if match.basename_candidate:
             detail += (
-                f"\n\nA file with the same name exists in Plex at:\n"
+                f"\n\nA file with the same name exists in {product} at:\n  "
                 f"{match.basename_candidate}"
             )
             suggestion = suggest_mapping(
@@ -199,34 +236,33 @@ def _check_request(
         record_event(
             tracked,
             service=service,
-            source_kind=ServiceKind.PLEX,
-            event_type=EventType.PLEX_MISSING,
+            source_kind=ServiceKind.MEDIA_SERVER,
+            event_type=EventType.MEDIA_SERVER_MISSING,
             occurred_at=now,
-            summary="Imported file not found in the Plex library",
+            summary=f"Imported file not found in the {product} library",
             detail=detail,
-            dedupe_key=f"plex:{service.pk}:missing",
+            dedupe_key=f"{scope}:missing",
             raw={
                 "arrPaths": arr_paths,
                 "attempted": match.attempted,
                 "basenameCandidate": match.basename_candidate,
+                "product": product,
             },
             update_existing=True,
         )
 
 
 def _mapping_detail(
-    arr_paths: list[str], match: PathMatchResult, item: PlexItem
+    arr_paths: list[str], match: PathMatchResult, item: MediaItem, product: str
 ) -> str:
     lines = []
     if arr_paths:
         lines.append("The *arr reports:\n  " + "\n  ".join(arr_paths))
-    if match.attempted:
+    if match.attempted and match.attempted != arr_paths:
         lines.append("After mapping, looked for:\n  " + "\n  ".join(match.attempted))
     if item.paths:
-        lines.append("Plex reports:\n  " + "\n  ".join(item.paths))
+        lines.append(f"{product} reports:\n  " + "\n  ".join(item.paths))
         suggestion = suggest_mapping(arr_paths[0], item.paths[0]) if arr_paths else None
         if suggestion:
-            lines.append(
-                f"Add a path mapping: {suggestion[0]} -> {suggestion[1]}"
-            )
+            lines.append(f"Add a path mapping: {suggestion[0]} -> {suggestion[1]}")
     return "\n\n".join(lines)

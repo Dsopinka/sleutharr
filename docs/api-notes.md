@@ -341,3 +341,236 @@ API that reveals this mapping — it is deployment configuration. So:
 * Basename matching is used as a corroborating signal only: if the *arr path's filename
   appears in Plex under a different directory, we report the specific prefix pair that would
   fix it.
+
+---
+
+# Round 2: broader service support
+
+Verified 2026-08-05, same standard as above — upstream source or official docs, never
+memory.
+
+| Service | Source of truth | Notes |
+|---|---|---|
+| Ombi | `Ombi.Store/Entities/Requests/*.cs` @ `develop` | v4 API |
+| Jellyfin / Emby | Jellyfin API docs + auth gist | `/Items`, `X-Emby-Token` |
+| SABnzbd | Official wiki `configuration/5.0/api` | API v2 |
+| NZBGet | Sonarr's own `Nzbget.cs` client | JSON-RPC |
+| Transmission | `docs/rpc-spec.md` @ `main` | RPC spec v18 |
+| Deluge | Sonarr's own `Deluge.cs` client | JSON-RPC |
+
+## 5. `downloadId` is not one thing — it is five
+
+The whole download-client join rests on the *arr's `downloadId`, and it is easy to assume
+it is always a torrent infohash. It is not. Read straight from Sonarr's own client
+implementations (`src/NzbDrone.Core/Download/Clients/*`), which is the authority on what
+value actually lands in the queue record:
+
+| Client | Sonarr source line | `downloadId` is |
+|---|---|---|
+| qBittorrent | `DownloadId = torrent.Hash.ToUpper()` | infohash, **uppercased** |
+| Deluge | `item.DownloadId = torrent.Hash.ToUpper()` | infohash, **uppercased** |
+| Transmission | `DownloadId = torrent.HashString.ToUpper()` | infohash, **uppercased** |
+| SABnzbd | `queueItem.DownloadId = sabQueueItem.Id` | `nzo_id` string, **case preserved** |
+| NZBGet | `item.NzbId.ToString()` (or the `drone` parameter) | **a decimal integer** |
+
+Three consequences, all implemented:
+
+1. All three torrent clients uppercase the hash while the clients themselves report
+   lowercase, so the existing `.lower()` normalisation on both sides is correct and now
+   applies to Transmission and Deluge too.
+2. SABnzbd's `nzo_id` is an opaque string (`SABnzbd_nzo_xxxxx`), not hex. It must not be
+   treated as a hash or validated as one.
+3. **NZBGet's id is a small integer like `42`, which is only unique within one NZBGet
+   instance.** A global "ask every download client about every id" lookup will therefore
+   happily match request A's NZBID `42` against a completely unrelated NZB in a *second*
+   NZBGet instance, and report confident nonsense about a download that has nothing to do
+   with the request.
+
+### ⚠️ Finding 8 — the download join must be scoped per client instance
+
+Because of (3) above, ids are only meaningful relative to the client that issued them.
+`QueueResource.downloadClient` carries the client's **name as configured inside the
+*arr**, and that is the only thing tying a queue row to a specific client. So:
+
+* `ServiceInstance.arr_client_name` records what this client is called inside Sonarr/Radarr
+  (defaulting to the Sleutharr service name when they match).
+* The join asks each client only about ids that the *arr attributed to that client, and
+  falls back to a global lookup **only** for torrent clients, whose infohashes are
+  genuinely globally unique.
+
+This is invisible with a single download client and produces wrong verdicts with two.
+
+## 6. Ombi
+
+Base path `/api/v1` (often behind a `/requests` sub-path — the configured base URL should
+include it). Auth header is `ApiKey`, capitalised exactly that way.
+
+* `GET /api/v1/Request/movie` → array of movie requests
+* `GET /api/v1/Request/tv` → array of TV requests
+* `GET /api/v1/Status` / `/api/v1/Settings/about` for a version probe
+
+Responses are camelCased .NET entities. From `BaseRequest.cs` plus the concrete types:
+
+```
+BaseRequest:   title, approved, available, denied, deniedReason, requestedDate,
+               markedAsApproved, markedAsAvailable, markedAsDenied,
+               requestedUser {userName, userAlias, emailAddress}, requestedByAlias
+MovieRequests: theMovieDbId, imdbId, releaseDate, subscribed, qualityOverride,
+               rootPathOverride
+TvRequests:    tvDbId, externalProviderId, imdbId, title, releaseDate, totalSeasons,
+               childRequests[] -> seasonRequests[] -> episodes[]
+```
+
+### ⚠️ Finding 9 — Ombi has no service-linkage fields at all
+
+Ombi stores **no** `externalServiceId`, no per-instance `serviceId`, and no `ratingKey`.
+There is nothing in an Ombi request that says which Sonarr/Radarr instance received it or
+which record it became. So on Ombi the *arr join is **always** the `tmdbId`/`tvdbId`
+fallback path, and the media-server join is always path-based.
+
+That is not a defect to work around, it is a capability difference, and it changes what
+`NEVER_ADDED` can claim: on Seerr a null `externalServiceId` is strong evidence the push
+failed, whereas on Ombi it means nothing because the field never exists. The rule is told
+which it is dealing with (`RequestManagerClient.links_to_arr_entity`) and softens its
+wording on Ombi rather than asserting something it cannot know.
+
+Ombi also has no 4K lane: `is_4k` is always false, and requests route by media type alone.
+
+## 7. Jellyfin and Emby
+
+Both accept `X-Emby-Token: <key>`, so one client serves both (Jellyfin also accepts
+`Authorization: MediaBrowser Token="…"`, but the simpler header is a documented fallback
+and is what we send).
+
+* Public probe, no auth: `GET /System/Info/Public`
+* Authenticated probe: `GET /System/Info`
+* Library scan: `GET /Items?Recursive=true&IncludeItemTypes=Movie,Episode&Fields=Path,ProviderIds&StartIndex=&Limit=`
+* Response: `{ Items: [...], TotalRecordCount, StartIndex }`
+* Item fields used: `Id`, `Name`, `Type`, `Path`, `ProviderIds { Tmdb, Tvdb, Imdb }`
+
+Two useful differences from Plex:
+
+* The file path is a **flat `Path` string** on the item, not nested under
+  `Media[] → Part[] → file`. Episodes carry their own `Path`.
+* `ProviderIds` gives a **direct tmdb/tvdb join**, which Plex does not offer without
+  parsing its `guid`. So on Jellyfin/Emby the id join and the path join are independent,
+  and the path-mismatch diagnosis is just as detectable as it is on Plex via ratingKey —
+  arguably more reliably.
+
+Jellyseerr/Seerr store `jellyfinMediaId` / `jellyfinMediaId4k`, giving a third join path
+when the pairing is Jellyseerr + Jellyfin.
+
+## 8. SABnzbd
+
+`GET /api?mode=<mode>&output=json&apikey=<key>`. `mode=version` needs no key.
+
+* `mode=queue` → `queue.slots[]`: `nzo_id`, `filename`, `status`, `percentage`, `mb`,
+  `mbleft`, `timeleft`
+* `mode=history` → `history.slots[]`: `nzo_id`, `name`, `status`, `fail_message`, `storage`
+
+`fail_message` on a history slot is the usenet equivalent of a torrent error string, and is
+quoted directly in the stall/failure diagnoses. Sizes are **megabytes as strings**, not
+bytes — they need parsing to float before any arithmetic.
+
+Deleting is `mode=queue&name=delete&value=<nzo_id>`, but Sleutharr never calls it: removal
+goes through the *arr's queue endpoint so the *arr stays consistent with its own history.
+
+## 9. NZBGet
+
+JSON-RPC over `POST /jsonrpc`, HTTP basic auth with the control username/password.
+**Only positional parameters are supported** — named params are rejected.
+
+Methods used: `version`, `listgroups`, `history`.
+
+### ⚠️ Finding 10 — 64-bit sizes arrive split into Hi/Lo halves
+
+NZBGet returns every 64-bit integer as two 32-bit fields: `FileSizeLo`/`FileSizeHi`,
+`RemainingSizeLo`/`RemainingSizeHi`. The value is `(Hi << 32) | Lo`.
+
+Reading only the `Lo` half — the obvious mistake, since it is correct for anything under
+4 GiB — silently reports wrong sizes for exactly the files this application cares about
+(a 12 GB remux reports as ~3.7 GB). Worse, progress computed from a truncated total can
+exceed 100% or go negative, which would trip the stall and import rules with nonsense.
+
+Fields used from `listgroups`: `NzbID`, `NZBName`, `Category`, `FileSizeLo/Hi`,
+`RemainingSizeLo/Hi`, `ActiveDownloads`, `Status`, `Health`, `DestDir`, `Parameters[]`.
+From `history`: `NZBID`, `Name`, `Status`, `DestDir`, `FinalDir`.
+
+`Health` is per-mille (1000 = 100%); a collapsing health value is the usenet analogue of
+losing seeds. `Status` values seen include `QUEUED`, `PAUSED`, `DOWNLOADING`,
+`FETCHING`, `PP_QUEUED`, `POST_PROCESSING`, and on history `SUCCESS/ALL`, `FAILURE/PAR`,
+`FAILURE/UNPACK`, `DELETED/MANUAL`.
+
+Note Sonarr prefers a `drone` post-processing parameter over `NzbID` when present, so the
+`downloadId` may not equal the current `NzbID`. Both are checked when matching.
+
+## 10. Transmission
+
+`POST /transmission/rpc`, JSON body `{"method": ..., "arguments": {...}}`.
+
+### ⚠️ Finding 11 — the mandatory 409 handshake
+
+Transmission requires an `X-Transmission-Session-Id` header on every call. The first
+request (and any request after the token expires) returns **HTTP 409** with the correct
+token in the response headers; the client is expected to store it and retry. A client that
+treats 409 as a normal error reports a perfectly healthy Transmission as unreachable
+forever. Handled by catching 409, adopting the header and retrying once.
+
+`torrent-get` with an explicit `fields` array. Fields used: `id`, `hashString`, `name`,
+`status`, `percentDone`, `rateDownload`, `eta`, `peersSendingToUs`, `leftUntilDone`,
+`totalSize`, `downloadDir`, `errorString`, `error`, `isFinished`, `activityDate`,
+`doneDate`.
+
+`status` is numeric, confirmed against `rpc-spec.md`:
+
+```
+0 stopped   1 check-wait   2 checking   3 download-wait
+4 downloading   5 seed-wait   6 seeding
+```
+
+(Transmission 2.40 renumbered these; anything documenting 1–16 is describing the old
+scheme and does not apply to any currently shipping version.)
+
+Transmission reports no swarm-wide seed count, only `peersSendingToUs` — the connected
+count. So the "zero seeds" branch treats Transmission like a tracker that withholds the
+scrape: connected-zero **and** rate-zero, never "swarm has 0 seeds".
+
+## 11. Deluge
+
+JSON-RPC over `POST /json` with a cookie session. `auth.login` with the web password
+first, then `web.update_ui` / `core.get_torrents_status`.
+
+Like qBittorrent's login, **`auth.login` returns HTTP 200 with `"result": false` on a bad
+password** rather than an error status, so the result body must be checked.
+
+Fields used: `hash`, `name`, `state`, `progress` (0–100, *not* 0–1 like qBittorrent),
+`num_seeds`, `total_seeds`, `download_payload_rate`, `eta`, `total_remaining`,
+`total_size`, `save_path`, `message`.
+
+Note the `progress` scale difference — treating Deluge's 0–100 as a 0–1 fraction makes
+every torrent look 100× complete and permanently "finished", which would route every
+stalled Deluge download into the wrong diagnosis.
+
+## 12. Write operations (new in v2)
+
+Sleutharr remains read-only by default. Exactly one class of write is implemented, always
+behind an explicit confirmation, never automatically:
+
+`DELETE /api/v3/queue/{id}` on Sonarr/Radarr, confirmed against both OpenAPI schemas:
+
+| Param | Default | We send |
+|---|---|---|
+| `removeFromClient` | `true` | `true` — delete the data from the download client |
+| `blocklist` | `false` | `true` — stop the *arr picking the same release again |
+| `skipRedownload` | `false` | `false` — let the *arr search for a replacement itself |
+| `changeCategory` | `false` | `false` |
+
+Removal goes through the *arr rather than straight to the download client on purpose: the
+*arr then updates its own queue and history, blocklists the release, and triggers the
+replacement search. Deleting from the client directly would leave the *arr believing the
+download is still in flight.
+
+`skipRedownload=false` is why there is no separate "search again" button in the normal
+flow — the *arr already does it. A standalone search command
+(`POST /api/v3/command` with `MoviesSearch`/`SeriesSearch`) exists behind a setting that
+is **off by default**, for the cases where nothing was ever grabbed.

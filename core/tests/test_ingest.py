@@ -15,7 +15,7 @@ from django.test import TestCase
 
 from core.clients.arr import RadarrClient
 from core.clients.download import QBittorrentClient
-from core.clients.plex import PlexClient
+from core.clients.mediaserver import PlexClient
 from core.clients.requestmanager import SeerrClient
 from core.ingest.arr import sync_arr_entities, sync_arr_history
 from core.ingest.download import sync_download_clients
@@ -274,7 +274,7 @@ class DownloadIngestTests(TestCase):
 class PlexPathIndexTests(TestCase):
     def setUp(self):
         self.plex = make_service(
-            ServiceKind.PLEX, name="Plex", base_url="http://plex:32400"
+            ServiceKind.MEDIA_SERVER, name="Plex", base_url="http://plex:32400"
         )
 
     def test_index_and_mapping_resolve_an_arr_path(self):
@@ -312,7 +312,7 @@ class PlexPathIndexTests(TestCase):
             "/movies/dune part two (2024)/dune part two (2024) webdl-1080p.mkv", index
         )
 
-        from core.clients.plex import match_paths
+        from core.clients.mediaserver import match_paths
 
         mapping = PathMapping(
             source_prefix="/data/media/movies", target_prefix="/movies"

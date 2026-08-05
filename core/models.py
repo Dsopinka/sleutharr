@@ -17,17 +17,71 @@ class ServiceKind(models.TextChoices):
     SONARR = "sonarr", "Sonarr"
     RADARR = "radarr", "Radarr"
     DOWNLOAD_CLIENT = "download_client", "Download client"
-    PLEX = "plex", "Plex"
+    MEDIA_SERVER = "media_server", "Media server"
 
 
 class ServiceVariant(models.TextChoices):
-    """Concrete product behind a ServiceKind, where more than one exists."""
+    """Concrete product behind a ServiceKind.
 
+    The kind says what role a service plays in the chain; the variant says which product
+    is filling it. Rules only ever reason about kinds, so adding a product never touches
+    the diagnosis layer.
+    """
+
+    # Request managers
     SEERR = "seerr", "Seerr"
     OVERSEERR = "overseerr", "Overseerr"
     JELLYSEERR = "jellyseerr", "Jellyseerr"
+    OMBI = "ombi", "Ombi"
+
+    # Media servers
+    PLEX = "plex", "Plex"
+    JELLYFIN = "jellyfin", "Jellyfin"
+    EMBY = "emby", "Emby"
+
+    # Download clients
     QBITTORRENT = "qbittorrent", "qBittorrent"
+    TRANSMISSION = "transmission", "Transmission"
+    DELUGE = "deluge", "Deluge"
+    SABNZBD = "sabnzbd", "SABnzbd"
+    NZBGET = "nzbget", "NZBGet"
+
     NATIVE = "native", "Native"
+
+
+#: Which variants make sense for which kind. Drives the settings form so a user cannot
+#: pair, say, a Radarr kind with a SABnzbd variant.
+VARIANTS_BY_KIND: dict[str, list[str]] = {
+    ServiceKind.REQUEST_MANAGER: [
+        ServiceVariant.SEERR,
+        ServiceVariant.OVERSEERR,
+        ServiceVariant.JELLYSEERR,
+        ServiceVariant.OMBI,
+    ],
+    ServiceKind.SONARR: [ServiceVariant.NATIVE],
+    ServiceKind.RADARR: [ServiceVariant.NATIVE],
+    ServiceKind.DOWNLOAD_CLIENT: [
+        ServiceVariant.QBITTORRENT,
+        ServiceVariant.TRANSMISSION,
+        ServiceVariant.DELUGE,
+        ServiceVariant.SABNZBD,
+        ServiceVariant.NZBGET,
+    ],
+    ServiceKind.MEDIA_SERVER: [
+        ServiceVariant.PLEX,
+        ServiceVariant.JELLYFIN,
+        ServiceVariant.EMBY,
+    ],
+}
+
+#: Variants whose download ids are globally-unique infohashes. NZBGet hands out small
+#: integers that are only unique within one instance, and SABnzbd uses opaque per-instance
+#: strings, so those must never be looked up across clients. See docs/api-notes.md #8.
+GLOBALLY_UNIQUE_ID_VARIANTS = {
+    ServiceVariant.QBITTORRENT,
+    ServiceVariant.TRANSMISSION,
+    ServiceVariant.DELUGE,
+}
 
 
 class ServiceInstance(models.Model):
@@ -62,6 +116,16 @@ class ServiceInstance(models.Model):
         default=False, help_text="This instance handles the request manager's 4K lane."
     )
 
+    # Download clients only. The *arr's queue rows name the client that took each
+    # download; that name is the only thing tying a queue row to a specific client, and
+    # it is required to scope ids that are not globally unique (NZBGet hands out small
+    # integers). Blank means "assume it matches this service's name".
+    arr_client_name = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="What this download client is called inside Sonarr/Radarr.",
+    )
+
     # Health, written by the pollers.
     last_seen_ok = models.DateTimeField(null=True, blank=True)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
@@ -89,6 +153,15 @@ class ServiceInstance(models.Model):
 
     def is_backed_off(self) -> bool:
         return bool(self.backoff_until and self.backoff_until > timezone.now())
+
+    @property
+    def client_name(self) -> str:
+        """The name the *arr knows this download client by."""
+        return self.arr_client_name or self.name
+
+    @property
+    def ids_are_globally_unique(self) -> bool:
+        return self.variant in GLOBALLY_UNIQUE_ID_VARIANTS
 
 
 class PathMapping(models.Model):
@@ -200,9 +273,9 @@ class TrackedRequest(models.Model):
     arr_last_synced = models.DateTimeField(null=True, blank=True)
 
     # --- resolved join to Plex ---------------------------------------------------
-    plex_rating_key = models.CharField(max_length=64, blank=True)
-    plex_found = models.BooleanField(null=True, blank=True)
-    plex_matched_path = models.CharField(max_length=1000, blank=True)
+    media_server_item_id = models.CharField(max_length=64, blank=True)
+    media_server_found = models.BooleanField(null=True, blank=True)
+    media_server_matched_path = models.CharField(max_length=1000, blank=True)
 
     first_seen = models.DateTimeField(auto_now_add=True)
     last_polled = models.DateTimeField(null=True, blank=True)
@@ -269,8 +342,8 @@ class EventType(models.TextChoices):
     QUEUED = "queued", "In download queue"
     DOWNLOAD_PROGRESS = "download_progress", "Download progress"
     IMPORT_BLOCKED = "import_blocked", "Import blocked"
-    PLEX_AVAILABLE = "plex_available", "Available in Plex"
-    PLEX_MISSING = "plex_missing", "Not found in Plex"
+    MEDIA_SERVER_AVAILABLE = "media_server_available", "Available in Plex"
+    MEDIA_SERVER_MISSING = "media_server_missing", "Not found in Plex"
     UNKNOWN = "unknown", "Unknown"
 
 
@@ -372,6 +445,45 @@ class IngestCursor(models.Model):
         return f"{self.service_id}:{self.scope}"
 
 
+class ActionStatus(models.TextChoices):
+    SUCCESS = "success", "Succeeded"
+    FAILED = "failed", "Failed"
+
+
+class ActionLog(models.Model):
+    """Record of every write Sleutharr has performed.
+
+    Sleutharr is read-only apart from a small set of explicitly-confirmed remediations.
+    Anything that does write gets a durable record here, because "did Sleutharr delete
+    that, or did something else?" needs an answer that is not a guess.
+    """
+
+    request = models.ForeignKey(
+        TrackedRequest,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="actions",
+    )
+    #: Denormalised so the log survives the request being deleted.
+    request_title = models.CharField(max_length=500, blank=True)
+    action = models.CharField(max_length=64)
+    target_service = models.CharField(max_length=120, blank=True)
+    #: Exactly what was sent upstream, so the record is auditable after the fact.
+    detail = models.TextField(blank=True)
+    params = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=ActionStatus.choices)
+    error = models.TextField(blank=True)
+    performed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-performed_at"]
+        indexes = [models.Index(fields=["-performed_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.action} on {self.request_title} ({self.status})"
+
+
 class AppSetting(models.Model):
     """Small key/value store for tunables the rules read (windows, grace periods)."""
 
@@ -381,14 +493,24 @@ class AppSetting(models.Model):
     def __str__(self) -> str:
         return self.key
 
+    _UNSET = object()
+
     @classmethod
-    def get(cls, key: str, default=None):
+    def get(cls, key: str, default=_UNSET):
+        """Stored value, else the caller's default, else the shipped default.
+
+        The sentinel matters: `default=None` would make a legitimately stored or
+        defaulted `False` indistinguishable from "no default given", which is exactly
+        the case for the boolean flags.
+        """
         row = cls.objects.filter(key=key).first()
         if row is not None:
             return row.value
-        if default is not None:
+        if default is not cls._UNSET:
             return default
-        return DEFAULT_SETTINGS.get(key)
+        if key in DEFAULT_SETTINGS:
+            return DEFAULT_SETTINGS[key]
+        return DEFAULT_FLAGS.get(key)
 
     @classmethod
     def set(cls, key: str, value) -> None:
@@ -406,4 +528,13 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "plex_grace_minutes": 60,
     # Rule 8: grab/fail cycles on one title before it is a loop.
     "blocklist_loop_threshold": 3,
+}
+
+#: Booleans are kept apart from the numeric tunables so the settings form can render them
+#: as checkboxes rather than number inputs.
+DEFAULT_FLAGS: dict[str, bool] = {
+    # Removing from the queue with blocklist=true already makes Sonarr/Radarr search for
+    # a replacement, so a separate search button is usually redundant. Off by default;
+    # it exists for the cases where nothing was ever grabbed at all.
+    "enable_search_action": False,
 }
