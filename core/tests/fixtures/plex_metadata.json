@@ -1,0 +1,44 @@
+{
+  "_comment": "GET /library/metadata/20481 with Accept: application/json. Note Media/Part are capitalised, `file` is not. Plex reports /movies/... where Radarr reports /data/media/movies/...",
+  "MediaContainer": {
+    "size": 1,
+    "allowSync": true,
+    "identifier": "com.plexapp.plugins.library",
+    "librarySectionID": 1,
+    "librarySectionTitle": "Movies",
+    "Metadata": [
+      {
+        "ratingKey": "20481",
+        "key": "/library/metadata/20481",
+        "guid": "plex://movie/5d7768ba96b655001fdc0f8a",
+        "type": "movie",
+        "title": "Dune: Part Two",
+        "librarySectionID": 1,
+        "year": 2024,
+        "addedAt": 1751376000,
+        "updatedAt": 1751376100,
+        "Media": [
+          {
+            "id": 33001,
+            "duration": 9960000,
+            "bitrate": 12000,
+            "width": 1920,
+            "height": 1080,
+            "videoResolution": "1080",
+            "container": "mkv",
+            "Part": [
+              {
+                "id": 44001,
+                "key": "/library/parts/44001/1751376000/file.mkv",
+                "duration": 9960000,
+                "file": "/movies/Dune Part Two (2024)/Dune Part Two (2024) WEBDL-1080p.mkv",
+                "size": 8698986496,
+                "container": "mkv"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
