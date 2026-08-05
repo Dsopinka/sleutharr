@@ -1,0 +1,35 @@
+{% extends "core/base.html" %}
+
+{% block title %}Health &middot; Sleutharr{% endblock %}
+
+{% block content %}
+<h1>Service health</h1>
+<p class="subtitle">Reachability, last successful poll, and authentication state per service.</p>
+
+{% if services %}
+<table>
+  <thead>
+    <tr>
+      <th style="width:20px"></th>
+      <th>Service</th>
+      <th>Kind</th>
+      <th>URL</th>
+      <th>Version</th>
+      <th>Last OK</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for service in services %}
+      {% include "core/_health_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">
+  <strong>No services configured.</strong>
+  <p style="margin-top:14px"><a class="btn btn-primary" href="{% url 'settings' %}">Add one</a></p>
+</div>
+{% endif %}
+{% endblock %}

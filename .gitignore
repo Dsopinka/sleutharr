@@ -1,0 +1,9 @@
+.venv/
+config/
+__pycache__/
+*.pyc
+*.db
+*.sqlite3
+*.db-wal
+*.db-shm
+.DS_Store

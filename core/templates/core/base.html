@@ -1,0 +1,37 @@
+{% load static %}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Sleutharr{% endblock %}</title>
+  {# ?v= busts the browser cache on upgrade, so a container update cannot leave users on the previous release's stylesheet. #}
+  <link rel="stylesheet" href="{% static 'core/app.css' %}?v={{ app_version }}">
+  <script src="{% static 'core/htmx.min.js' %}?v={{ app_version }}" defer></script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128373;</text></svg>">
+</head>
+<body>
+<nav class="topbar">
+  <a class="brand" href="{% url 'dashboard' %}">Sleutharr</a>
+  <div class="navlinks">
+    <a href="{% url 'dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+    <a href="{% url 'search' %}" {% if request.resolver_match.url_name == 'search' %}class="active"{% endif %}>Search</a>
+    <a href="{% url 'health' %}" {% if request.resolver_match.url_name == 'health' %}class="active"{% endif %}>
+      Health{% if unhealthy_count %} <span class="dot dot-error" title="{{ unhealthy_count }} service(s) failing"></span>{% endif %}
+    </a>
+    <a href="{% url 'settings' %}" {% if request.resolver_match.url_name == 'settings' %}class="active"{% endif %}>Settings</a>
+  </div>
+  <form method="post" action="{% url 'run_poll_now' %}" class="inline">
+    {% csrf_token %}
+    <button class="btn btn-ghost" type="submit" title="Poll every service now">Poll now</button>
+  </form>
+</nav>
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  Sleutharr v{{ app_version }} &middot; read-only against all upstream services
+</footer>
+</body>
+</html>

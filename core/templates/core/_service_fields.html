@@ -1,0 +1,71 @@
+{# Shared by the add and edit forms. `service` is None when adding. #}
+<div class="grid grid-2">
+  <div class="field">
+    <label>Name</label>
+    <input type="text" name="name" value="{{ service.name|default:'' }}" required
+           placeholder="Radarr 4K">
+  </div>
+  <div class="field">
+    <label>Kind</label>
+    <select name="kind">
+      {% for value, label in kinds %}
+        <option value="{{ value }}" {% if service and service.kind == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label>Variant</label>
+    <select name="variant">
+      {% for value, label in variants %}
+        <option value="{{ value }}" {% if service and service.variant == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <div class="hint">Seerr for the request manager; qBittorrent for the download client; Native otherwise.</div>
+  </div>
+  <div class="field">
+    <label>Base URL</label>
+    <input type="text" name="base_url" value="{{ service.base_url|default:'' }}" required
+           placeholder="http://192.168.1.10:7878">
+    <div class="hint">No trailing slash, no /api suffix.</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="field">
+    <label>API key {% if service and service.api_key %}<span class="hint" style="display:inline">(stored &mdash; leave blank to keep)</span>{% endif %}</label>
+    <input type="password" name="api_key" autocomplete="new-password"
+           placeholder="{% if service and service.api_key %}••••••••••••{% else %}API key / X-Plex-Token{% endif %}">
+  </div>
+  <div class="field">
+    <label>Username <span class="hint" style="display:inline">(qBittorrent only)</span></label>
+    <input type="text" name="username" value="{{ service.username|default:'' }}" autocomplete="off">
+  </div>
+  <div class="field">
+    <label>Password <span class="hint" style="display:inline">(qBittorrent only)</span></label>
+    <input type="password" name="password" autocomplete="new-password"
+           placeholder="{% if service and service.password %}••••••••••••{% else %}{% endif %}">
+  </div>
+  <div class="field">
+    <label>Poll interval (seconds)</label>
+    <input type="number" name="poll_interval" min="10" value="{{ service.poll_interval|default:60 }}">
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="field">
+    <label>Request manager service id</label>
+    <input type="number" name="remote_service_id"
+           value="{{ service.remote_service_id|default_if_none:'' }}">
+    <div class="hint">
+      Sonarr/Radarr only. The <code>serviceId</code> the request manager uses for this
+      instance &mdash; how a request is routed to the right one when several are configured.
+      Leave blank to fall back to matching on TMDB/TVDB id.
+    </div>
+  </div>
+</div>
+
+<div class="checkrow">
+  <label><input type="checkbox" name="enabled" {% if not service or service.enabled %}checked{% endif %}> Enabled</label>
+  <label><input type="checkbox" name="verify_tls" {% if not service or service.verify_tls %}checked{% endif %}> Verify TLS</label>
+  <label><input type="checkbox" name="is_4k" {% if service and service.is_4k %}checked{% endif %}> Handles the 4K lane</label>
+</div>

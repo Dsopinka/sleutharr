@@ -1,0 +1,10 @@
+# Runtime dependencies. Deliberately minimal -- no broker, no Postgres, no JS build step.
+Django>=5.2,<6.0
+djangorestframework>=3.16,<4.0
+APScheduler>=3.11,<4.0
+httpx>=0.28,<0.29
+gunicorn>=23.0
+
+# htmx is vendored at core/static/core/htmx.min.js (v2.0.4) rather than pulled from a
+# CDN: a self-hosted tool should not need outbound internet to render its own UI.
+# Tests use Django's built-in runner and httpx.MockTransport -- no test dependencies.

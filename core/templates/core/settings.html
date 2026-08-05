@@ -1,0 +1,130 @@
+{% extends "core/base.html" %}
+
+{% block title %}Settings &middot; Sleutharr{% endblock %}
+
+{% block content %}
+<h1>Settings</h1>
+<p class="subtitle">
+  All service URLs and keys live here, in the database &mdash; not in env vars.
+  Sleutharr only ever reads from these services.
+</p>
+
+<h2>Services</h2>
+
+{% for service in services %}
+<details class="svc">
+  <summary>
+    {% if not service.enabled %}<span class="dot dot-idle"></span>
+    {% elif service.consecutive_failures %}<span class="dot dot-error"></span>
+    {% elif service.last_seen_ok %}<span class="dot dot-ok"></span>
+    {% else %}<span class="dot dot-warning"></span>{% endif %}
+    <strong>{{ service.name }}</strong>
+    <span class="svc-kind">{{ service.get_kind_display }}{% if service.variant != 'native' %} &middot; {{ service.get_variant_display }}{% endif %}</span>
+    {% if service.is_4k %}<span class="badge badge-none">4K</span>{% endif %}
+    <span class="spacer"></span>
+    <span class="svc-kind">{{ service.base_url }}</span>
+  </summary>
+  <div class="body">
+    <form method="post" action="{% url 'service_save' service.pk %}">
+      {% csrf_token %}
+      {% include "core/_service_fields.html" with service=service %}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-primary" type="submit">Save</button>
+        <span class="spacer"></span>
+      </div>
+    </form>
+    <form method="post" action="{% url 'service_delete' service.pk %}"
+          onsubmit="return confirm('Delete {{ service.name|escapejs }}? Its tracked requests and timeline events go too.')"
+          style="margin-top:8px">
+      {% csrf_token %}
+      <button class="btn btn-sm btn-danger" type="submit">Delete service</button>
+    </form>
+  </div>
+</details>
+{% empty %}
+<p class="hint" style="margin-bottom:14px">Nothing configured yet. Add a request manager first &mdash; it is the source of every request.</p>
+{% endfor %}
+
+<details class="svc">
+  <summary><strong>+ Add a service</strong></summary>
+  <div class="body">
+    <form method="post" action="{% url 'service_create' %}">
+      {% csrf_token %}
+      {% include "core/_service_fields.html" with service=None %}
+      <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Add service</button></div>
+    </form>
+  </div>
+</details>
+
+<h2>Path translation</h2>
+<div class="panel">
+  <p class="hint" style="margin-top:0">
+    Rewrites an *arr filesystem path into the path Plex reports. Container mounts differ
+    between apps &mdash; Radarr may see <code>/data/media/movies</code> where Plex sees
+    <code>/movies</code>. A missing or wrong mapping is one of the most common causes of
+    "it imported but never showed up", so Sleutharr reports it as its own diagnosis rather
+    than claiming the file is missing.
+  </p>
+
+  {% if mappings %}
+  <table style="margin-bottom:14px">
+    <thead><tr><th>Order</th><th>*arr path</th><th>Plex path</th><th>Note</th><th></th></tr></thead>
+    <tbody>
+      {% for m in mappings %}
+      <tr>
+        <td class="num">{{ m.order }}</td>
+        <td class="path">{{ m.source_prefix }}</td>
+        <td class="path">{{ m.target_prefix }}</td>
+        <td>{{ m.note }}</td>
+        <td class="nowrap">
+          <form method="post" action="{% url 'mapping_delete' m.pk %}">
+            {% csrf_token %}<button class="btn btn-sm btn-danger" type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <form method="post" action="{% url 'mapping_save' %}">
+    {% csrf_token %}
+    <div class="grid grid-2">
+      <div class="field">
+        <label>Path as the *arr sees it</label>
+        <input type="text" name="source_prefix" placeholder="/data/media/movies" required>
+      </div>
+      <div class="field">
+        <label>Path as Plex sees it</label>
+        <input type="text" name="target_prefix" placeholder="/movies" required>
+      </div>
+      <div class="field">
+        <label>Note</label>
+        <input type="text" name="note" placeholder="optional">
+      </div>
+      <div class="field">
+        <label>Order</label>
+        <input type="number" name="order" value="0">
+      </div>
+    </div>
+    <button class="btn" type="submit">Add mapping</button>
+  </form>
+</div>
+
+<h2>Diagnosis tuning</h2>
+<div class="panel">
+  <p class="hint" style="margin-top:0">Thresholds the rules engine reads. Defaults suit most setups.</p>
+  <form method="post" action="{% url 'tunables_save' %}">
+    {% csrf_token %}
+    <div class="grid grid-3">
+      {% for key, value in tunables.items %}
+      <div class="field">
+        <label>{{ key }}</label>
+        <input type="number" step="any" name="{{ key }}" value="{{ value }}">
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn" type="submit">Save thresholds</button>
+  </form>
+</div>
+{% endblock %}
