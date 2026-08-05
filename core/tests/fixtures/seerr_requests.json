@@ -1,0 +1,109 @@
+{
+  "_comment": "Recorded shape of GET /api/v1/request. The media objects carry the doubled 4K keys documented in docs/api-notes.md but absent from the published OpenAPI schema.",
+  "pageInfo": { "pages": 1, "pageSize": 20, "results": 3, "page": 1 },
+  "results": [
+    {
+      "id": 101,
+      "status": 2,
+      "createdAt": "2026-07-01T10:00:00.000Z",
+      "updatedAt": "2026-07-01T10:00:05.000Z",
+      "type": "movie",
+      "is4k": false,
+      "serverId": 0,
+      "profileId": 4,
+      "rootFolder": "/data/media/movies",
+      "requestedBy": {
+        "id": 3,
+        "displayName": "alice",
+        "username": "alice",
+        "email": "alice@example.com"
+      },
+      "modifiedBy": { "id": 1, "displayName": "admin" },
+      "seasons": [],
+      "media": {
+        "id": 55,
+        "mediaType": "movie",
+        "tmdbId": 693134,
+        "tvdbId": null,
+        "imdbId": "tt15239678",
+        "status": 3,
+        "status4k": 1,
+        "serviceId": 0,
+        "serviceId4k": 1,
+        "externalServiceId": 412,
+        "externalServiceId4k": 77,
+        "externalServiceSlug": "dune-part-two-2024",
+        "externalServiceSlug4k": "dune-part-two-2024",
+        "ratingKey": "20481",
+        "ratingKey4k": null,
+        "createdAt": "2026-07-01T10:00:00.000Z",
+        "updatedAt": "2026-07-02T04:11:00.000Z"
+      }
+    },
+    {
+      "id": 102,
+      "status": 2,
+      "createdAt": "2026-07-02T18:30:00.000Z",
+      "updatedAt": "2026-07-02T18:30:02.000Z",
+      "type": "movie",
+      "is4k": true,
+      "serverId": 1,
+      "profileId": 7,
+      "rootFolder": "/data/media/movies-4k",
+      "requestedBy": { "id": 4, "displayName": "bob", "username": "bob" },
+      "seasons": [],
+      "media": {
+        "id": 55,
+        "mediaType": "movie",
+        "tmdbId": 693134,
+        "tvdbId": null,
+        "imdbId": "tt15239678",
+        "status": 3,
+        "status4k": 1,
+        "serviceId": 0,
+        "serviceId4k": 1,
+        "externalServiceId": 412,
+        "externalServiceId4k": 77,
+        "externalServiceSlug": "dune-part-two-2024",
+        "externalServiceSlug4k": "dune-part-two-2024",
+        "ratingKey": "20481",
+        "ratingKey4k": null,
+        "createdAt": "2026-07-01T10:00:00.000Z",
+        "updatedAt": "2026-07-02T04:11:00.000Z"
+      }
+    },
+    {
+      "id": 103,
+      "status": 4,
+      "createdAt": "2026-06-20T09:15:00.000Z",
+      "updatedAt": "2026-06-20T09:15:30.000Z",
+      "type": "tv",
+      "is4k": false,
+      "serverId": 0,
+      "seasons": [
+        { "id": 900, "seasonNumber": 2, "status": 2 },
+        { "id": 901, "seasonNumber": 3, "status": 2 }
+      ],
+      "requestedBy": { "id": 5, "displayName": "carol", "username": "carol" },
+      "media": {
+        "id": 56,
+        "mediaType": "tv",
+        "tmdbId": 94997,
+        "tvdbId": 371572,
+        "imdbId": "tt1160419",
+        "status": 2,
+        "status4k": 1,
+        "serviceId": null,
+        "serviceId4k": null,
+        "externalServiceId": null,
+        "externalServiceId4k": null,
+        "externalServiceSlug": null,
+        "externalServiceSlug4k": null,
+        "ratingKey": null,
+        "ratingKey4k": null,
+        "createdAt": "2026-06-20T09:15:00.000Z",
+        "updatedAt": "2026-06-20T09:15:30.000Z"
+      }
+    }
+  ]
+}

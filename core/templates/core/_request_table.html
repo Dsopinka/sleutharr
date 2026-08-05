@@ -1,0 +1,55 @@
+{% if requests %}
+<table class="requests">
+  <thead>
+    <tr>
+      <th class="c-title">Title</th>
+      <th class="c-user">Requested by</th>
+      <th class="c-age num">Age</th>
+      <th class="c-diag">Diagnosis</th>
+      <th class="c-act"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in requests %}
+    <tr>
+      <td class="title-cell">
+        <a href="{% url 'request_detail' r.pk %}">{{ r.display_title }}</a>
+        <div class="meta">{{ r.get_media_type_display }} &middot; {{ r.get_availability_display }}</div>
+      </td>
+      <td class="nowrap">{{ r.requested_by|default:"&mdash;" }}</td>
+      <td class="num nowrap {% if r.age_days > 30 %}age-ancient{% elif r.age_days > 7 %}age-old{% endif %}">
+        {{ r.age_days }}d
+      </td>
+      <td>
+        {% if r.diagnosis %}
+          <span class="badge badge-{{ r.diagnosis.severity }}">{{ r.diagnosis.code }}</span>
+          <div class="clamp">{{ r.diagnosis.message }}</div>
+          {% if r.diagnosis.next_step %}
+            <div class="clamp step">&rarr; {{ r.diagnosis.next_step }}</div>
+          {% endif %}
+        {% else %}
+          <span class="badge badge-none">undiagnosed</span>
+          <div class="clamp">Waiting for the next poll.</div>
+        {% endif %}
+      </td>
+      <td class="nowrap">
+        <a class="btn btn-sm" href="{% url 'request_detail' r.pk %}">Details</a>
+        {% if r.diagnosis.link_url %}
+          <a class="btn btn-sm" href="{{ r.diagnosis.link_url }}" target="_blank" rel="noopener"
+             title="{{ r.diagnosis.link_label }}">Open &rarr;</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">
+  {% if is_search %}
+    <strong>No matches.</strong> Try a title, a requester, or a diagnosis code.
+  {% else %}
+    <strong>Nothing outstanding.</strong>
+    Every tracked request has landed. That is the goal.
+  {% endif %}
+</div>
+{% endif %}

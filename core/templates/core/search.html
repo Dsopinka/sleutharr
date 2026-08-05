@@ -1,0 +1,22 @@
+{% extends "core/base.html" %}
+
+{% block title %}Search &middot; Sleutharr{% endblock %}
+
+{% block content %}
+<h1>Search</h1>
+<p class="subtitle">Match on title, requester, or diagnosis code. Includes fulfilled requests.</p>
+
+<form class="searchbar" method="get" action="{% url 'search' %}">
+  <input type="text" name="q" value="{{ query }}" autofocus
+         placeholder="Dune, alice, PLEX_PATH_MISMATCH&hellip;">
+  <button class="btn btn-primary" type="submit">Search</button>
+</form>
+
+<div class="chiprow">
+  {% for code in known_codes %}
+    <a class="chip {% if query == code %}active{% endif %}" href="{% url 'search' %}?q={{ code }}">{{ code }}</a>
+  {% endfor %}
+</div>
+
+{% if query %}{% include "core/_request_table.html" %}{% endif %}
+{% endblock %}
