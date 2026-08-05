@@ -1,0 +1,114 @@
+{% extends "core/base.html" %}
+
+{% block title %}{{ tracked.display_title }} &middot; Sleutharr{% endblock %}
+
+{% block content %}
+<h1>{{ tracked.display_title }}</h1>
+<p class="subtitle">
+  Requested by {{ tracked.requested_by|default:"unknown" }}
+  on {{ tracked.requested_at|date:"j M Y, H:i" }}
+  ({{ tracked.age_days }} day{{ tracked.age_days|pluralize }} ago)
+</p>
+
+{% if diagnosis %}
+<div class="panel panel-{{ diagnosis.severity }}">
+  <span class="badge badge-{{ diagnosis.severity }}">{{ diagnosis.code }}</span>
+  <p style="margin:9px 0 0;font-size:14px">{{ diagnosis.message }}</p>
+  {% if diagnosis.next_step %}
+  <div class="next-step">
+    <strong>Next step</strong>
+    {{ diagnosis.next_step }}
+    {% if diagnosis.link_url %}
+      <p style="margin:8px 0 0">
+        <a class="btn btn-sm" href="{{ diagnosis.link_url }}" target="_blank" rel="noopener">
+          {{ diagnosis.link_label|default:"Open" }} &rarr;
+        </a>
+      </p>
+    {% endif %}
+  </div>
+  {% endif %}
+  <p class="hint" style="margin-top:9px">
+    Evidence is highlighted in the timeline below. Computed {{ diagnosis.computed_at|timesince }} ago.
+  </p>
+</div>
+{% else %}
+<div class="panel">
+  <span class="badge badge-none">undiagnosed</span>
+  <p style="margin:9px 0 0;color:var(--text-dim)">
+    No rule has matched yet &mdash; either the pollers have not caught up, or nothing is wrong.
+  </p>
+</div>
+{% endif %}
+
+<h2>Facts</h2>
+<div class="panel">
+  <dl class="kv">
+    <dt>Media type</dt><dd>{{ tracked.get_media_type_display }}{% if tracked.is_4k %} &middot; 4K lane{% endif %}</dd>
+    <dt>Request state</dt><dd>{{ tracked.get_request_state_display }}</dd>
+    <dt>Availability</dt><dd>{{ tracked.get_availability_display }}</dd>
+    <dt>Request manager</dt><dd>{{ tracked.service.name }} (id {{ tracked.remote_id }})</dd>
+    <dt>TMDB / TVDB</dt><dd class="mono">{{ tracked.tmdb_id|default:"&mdash;" }} / {{ tracked.tvdb_id|default:"&mdash;" }}</dd>
+    {% if tracked.requested_seasons %}
+      <dt>Seasons</dt><dd>{{ tracked.requested_seasons|join:", " }}</dd>
+    {% endif %}
+    <dt>Library instance</dt>
+    <dd>
+      {% if tracked.arr_service %}
+        {{ tracked.arr_service.name }}
+        {% if tracked.arr_entity_id %}<span class="mono">(#{{ tracked.arr_entity_id }})</span>{% endif %}
+      {% else %}
+        <span style="color:var(--error)">not resolved</span>
+      {% endif %}
+    </dd>
+    {% if tracked.arr_monitored is not None %}
+      <dt>Monitored</dt>
+      <dd>{% if tracked.arr_monitored %}yes{% else %}<span style="color:var(--warning)">no</span>{% endif %}</dd>
+    {% endif %}
+    {% if tracked.arr_quality_profile_name %}
+      <dt>Quality profile</dt><dd>{{ tracked.arr_quality_profile_name }}</dd>
+    {% endif %}
+    <dt>In Plex</dt>
+    <dd>
+      {% if tracked.plex_found %}yes
+        {% if tracked.plex_matched_path %}<div class="path">{{ tracked.plex_matched_path }}</div>{% endif %}
+      {% elif tracked.plex_found is False %}<span style="color:var(--warning)">no</span>
+      {% else %}&mdash;{% endif %}
+    </dd>
+    <dt>Last polled</dt>
+    <dd>{% if tracked.last_polled %}{{ tracked.last_polled|timesince }} ago{% else %}never{% endif %}</dd>
+  </dl>
+</div>
+
+<h2>Timeline</h2>
+{% if events %}
+<div class="timeline">
+  {% for e in events %}
+  <div class="tl-row {% if e.is_evidence %}evidence{% endif %}">
+    <div class="tl-time">{{ e.occurred_at|date:"j M Y H:i" }}</div>
+    <div class="tl-lane lane-{{ e.source_kind }}">
+      {{ e.get_source_kind_display }}
+      {% if e.service %}<div style="color:var(--text-faint);text-transform:none;letter-spacing:0">{{ e.service.name }}</div>{% endif %}
+    </div>
+    <div class="tl-body">
+      <div class="summary">
+        {% if e.is_evidence %}<span class="badge badge-warning" style="margin-right:6px">evidence</span>{% endif %}
+        {{ e.summary }}
+      </div>
+      {% if e.detail %}<div class="detail">{{ e.detail }}</div>{% endif %}
+      {% if e.raw %}
+      <details class="raw">
+        <summary>raw payload</summary>
+        <pre class="json">{{ e.raw_json }}</pre>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <strong>No events yet.</strong>
+  Nothing has been ingested for this request. Check the Health page.
+</div>
+{% endif %}
+{% endblock %}
