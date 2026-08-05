@@ -31,7 +31,14 @@ _locks: dict[int, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
 MAX_BACKOFF_SECONDS = 15 * 60
-CONNECT_TIMEOUT = 10.0
+# Floor, not just a starting point. A poll cycle touches each *arr in three separate
+# stages (entities, history, queue); with a 2s first backoff a dead service is retried by
+# every one of them, so a single unreachable host costs minutes per cycle. The floor
+# guarantees a service that just failed is skipped for the remainder of the cycle.
+MIN_BACKOFF_SECONDS = 30
+# These services are on the LAN or the same Docker network. 5s is generous, and a short
+# connect timeout is what keeps an unreachable host from stalling the whole cycle.
+CONNECT_TIMEOUT = 5.0
 READ_TIMEOUT = 30.0
 
 
@@ -215,7 +222,9 @@ class BaseClient:
         if isinstance(error, ServiceError) and not error.retryable:
             backoff = MAX_BACKOFF_SECONDS
         else:
-            backoff = min(2**failures, MAX_BACKOFF_SECONDS)
+            backoff = min(
+                max(2**failures, MIN_BACKOFF_SECONDS), MAX_BACKOFF_SECONDS
+            )
         now = timezone.now()
         ServiceInstance.objects.filter(pk=self.service.pk).update(
             last_attempt_at=now,

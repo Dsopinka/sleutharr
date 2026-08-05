@@ -77,10 +77,11 @@ def _sync_entities_for_service(
             except ServiceError:
                 profiles = {}
             for tracked in requests:
-                try:
-                    _resolve_entity(client, service, tracked, profiles)
-                except ServiceError as exc:
-                    logger.debug("Entity lookup failed for %s: %s", tracked, exc)
+                # ServiceError deliberately propagates. A missing entity already comes
+                # back as None (get_entity swallows 404), so anything reaching here is
+                # service-level -- and retrying it once per tracked request turns one
+                # dead instance into minutes of stalled cycle.
+                _resolve_entity(client, service, tracked, profiles)
         client.record_success()
     except ServiceError as exc:
         client.record_failure(exc)
@@ -198,10 +199,8 @@ def sync_arr_history() -> None:
         try:
             with client:
                 for tracked in requests:
-                    try:
-                        _ingest_entity_history(client, service, tracked)
-                    except ServiceError as exc:
-                        logger.debug("History failed for %s: %s", tracked, exc)
+                    # As above: fail the service once rather than once per request.
+                    _ingest_entity_history(client, service, tracked)
             client.record_success()
         except ServiceError as exc:
             client.record_failure(exc)

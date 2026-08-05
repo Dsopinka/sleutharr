@@ -220,7 +220,7 @@ Then add it to `RULES` in `core/rules/__init__.py`, in priority order.
 SLEUTHARR_CONFIG_DIR=./config SLEUTHARR_SCHEDULER=0 .venv/bin/python manage.py test core
 ```
 
-89 tests, no live calls — client parsing runs against recorded fixtures in
+95 tests, no live calls — client parsing runs against recorded fixtures in
 `core/tests/fixtures/`, and the ingestion tests use `httpx.MockTransport`. There are no
 test-only dependencies.
 
@@ -258,7 +258,8 @@ no JS build step. htmx is vendored, so the UI needs no outbound internet.
   from the series' history as a whole, not per episode.
 - **The Docker image has not been built in this environment** (no Docker daemon
   available), so the `Dockerfile` and `docker-entrypoint.sh` are unverified by execution.
-  Everything else — migrations, the poll cycle, all 89 tests, and every page — was run.
+  Everything else — migrations, the poll cycle, all 95 tests, and every page under
+  gunicorn — was run.
 - **No live upstream instance was available** during development. All API behaviour was
   verified against upstream OpenAPI schemas and source code rather than a running server;
   see the `[UNVERIFIED-LIVE]` markers in `docs/api-notes.md` for the specific items worth

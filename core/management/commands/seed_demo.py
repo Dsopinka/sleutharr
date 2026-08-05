@@ -52,33 +52,33 @@ class Command(BaseCommand):
 
         seerr = self._service(
             ServiceKind.REQUEST_MANAGER, "Seerr", ServiceVariant.SEERR,
-            "http://seerr.local:5055", version="3.4.1",
+            "http://127.0.0.1:5055", version="3.4.1",
         )
         radarr = self._service(
             ServiceKind.RADARR, "Radarr", ServiceVariant.NATIVE,
-            "http://radarr.local:7878", version="5.14.0",
+            "http://127.0.0.1:7878", version="5.14.0",
         )
         radarr4k = self._service(
             ServiceKind.RADARR, "Radarr 4K", ServiceVariant.NATIVE,
-            "http://radarr4k.local:7878", version="5.14.0",
+            "http://127.0.0.1:7879", version="5.14.0",
             remote_service_id=1, is_4k=True,
         )
         sonarr = self._service(
             ServiceKind.SONARR, "Sonarr", ServiceVariant.NATIVE,
-            "http://sonarr.local:8989", version="4.0.10",
+            "http://127.0.0.1:8989", version="4.0.10",
         )
         qbt = self._service(
             ServiceKind.DOWNLOAD_CLIENT, "qBittorrent", ServiceVariant.QBITTORRENT,
-            "http://qbt.local:8080", version="5.0.3",
+            "http://127.0.0.1:8081", version="5.0.3",
         )
         plex = self._service(
             ServiceKind.PLEX, "Plex", ServiceVariant.NATIVE,
-            "http://plex.local:32400", version="1.41.3",
+            "http://127.0.0.1:32400", version="1.41.3",
         )
         # One service deliberately broken, so the Health page shows both states.
         self._service(
             ServiceKind.SONARR, "Sonarr Anime", ServiceVariant.NATIVE,
-            "http://sonarr-anime.local:8989", healthy=False,
+            "http://127.0.0.1:8990", healthy=False,
         )
 
         PathMapping.objects.get_or_create(

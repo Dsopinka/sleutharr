@@ -92,10 +92,10 @@ def sync_plex() -> None:
             with client:
                 index = client.build_path_index()
                 for tracked in candidates:
-                    try:
-                        _check_request(client, service, tracked, index, mappings)
-                    except ServiceError as exc:
-                        logger.debug("Plex check failed for %s: %s", tracked, exc)
+                    # ServiceError propagates: a missing item already returns None from
+                    # client.item(), so anything here is service-level and retrying it
+                    # once per candidate would stall the cycle on a dead Plex.
+                    _check_request(client, service, tracked, index, mappings)
             client.record_success()
         except ServiceError as exc:
             client.record_failure(exc)
