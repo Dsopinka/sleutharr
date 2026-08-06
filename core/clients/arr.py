@@ -299,6 +299,19 @@ class ArrClient(BaseClient):
             raw=row,
         )
 
+    # -- interactive search ----------------------------------------------------
+
+    def releases(self, entity_id: int) -> list[dict]:
+        """Ask the indexers what exists, and why each release was or was not accepted.
+
+        This is the *arr's "interactive search": it queries every enabled indexer live,
+        so it takes tens of seconds and puts real load on them. It is never called from
+        the poll cycle -- only when a user explicitly asks why nothing is being found.
+        """
+        params = {self.entity_id_param: entity_id}
+        data = self.get_json("/release", params=params)
+        return data if isinstance(data, list) else []
+
     # -- quality profiles ------------------------------------------------------
 
     def quality_profiles(self) -> dict[int, dict]:

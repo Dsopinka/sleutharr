@@ -517,3 +517,18 @@ table.discovery input[type=checkbox] { width: auto; }
   margin-left: 6px;
   vertical-align: middle;
 }
+
+/* Rejection counts, sized to read as a tally rather than a metric. */
+.reject-count {
+  display: inline-block;
+  min-width: 26px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  font-size: 12px;
+  color: var(--warning);
+  background: #3a2f18;
+  border: 1px solid #574325;
+  border-radius: 4px;
+  padding: 1px 5px;
+}

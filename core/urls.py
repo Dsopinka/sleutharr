@@ -35,6 +35,12 @@ urlpatterns = [
     path("settings/discover/apply/", views.discover_apply, name="discover_apply"),
     path("request/<int:pk>/remove/", views.action_remove, name="action_remove"),
     path("request/<int:pk>/search/", views.action_search, name="action_search"),
+    path("request/<int:pk>/why/", views.why_nothing_found, name="why_nothing_found"),
+    path(
+        "request/<int:pk>/apply-mapping/",
+        views.apply_suggested_mapping,
+        name="apply_suggested_mapping",
+    ),
     path("poll/", views.run_poll_now, name="run_poll_now"),
     path("api/requests/", views.api_requests, name="api_requests"),
 ]

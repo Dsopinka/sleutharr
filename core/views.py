@@ -38,6 +38,11 @@ from core.models import (
 
 logger = logging.getLogger(__name__)
 
+#: Diagnoses where an interactive search can explain itself. All of them mean "the *arr
+#: looked and came back with nothing usable", which is exactly what rejection reasons
+#: answer.
+EXPLAINABLE_CODES = {"NO_RELEASE_FOUND", "NEVER_SEARCHED", "BLOCKLIST_LOOP", "WRONG_QUALITY"}
+
 
 # --------------------------------------------------------------------------- dashboard
 
@@ -153,6 +158,8 @@ def request_detail(request, pk: int):
             "remove": describe_remove(tracked),
             "search_enabled": search_enabled(),
             "actions": tracked.actions.all()[:10],
+            "diagnosis_code": diagnosis.code if diagnosis else "",
+            "explainable": EXPLAINABLE_CODES,
         },
     )
 
@@ -570,6 +577,77 @@ def _media_server_result(request, *, message: str = "", error: str = ""):
     )
 
 
+# ------------------------------------------------------------------------- explaining
+
+
+@require_POST
+def why_nothing_found(request, pk: int):
+    """Run an interactive search and report why each release was rejected.
+
+    Slow by nature -- it queries every enabled indexer live -- so it is only ever run
+    when someone presses the button, never from the poll cycle.
+    """
+    from core.searchreport import run_search_report
+
+    tracked = get_object_or_404(TrackedRequest, pk=pk)
+    report = run_search_report(tracked)
+    return render(
+        request, "core/_search_report.html", {"report": report, "tracked": tracked}
+    )
+
+
+@require_POST
+def apply_suggested_mapping(request, pk: int):
+    """Add the path mapping the mismatch diagnosis worked out.
+
+    This edits Sleutharr's own configuration and touches no upstream service, so unlike
+    the queue actions it needs no warning -- the worst case is a mapping that does not
+    match anything, which is inert and removable.
+    """
+    from core.clients.mediaserver import suggest_mapping
+
+    tracked = get_object_or_404(TrackedRequest, pk=pk)
+    event = (
+        tracked.events.filter(dedupe_key__endswith=":path_mismatch")
+        .order_by("-occurred_at")
+        .first()
+    )
+    raw = (event.raw if event and isinstance(event.raw, dict) else {}) or {}
+    arr_paths = raw.get("arrPaths") or []
+    server_paths = raw.get("serverPaths") or raw.get("plexPaths") or []
+
+    suggestion = (
+        suggest_mapping(arr_paths[0], server_paths[0])
+        if arr_paths and server_paths
+        else None
+    )
+    if not suggestion:
+        return _action_result(
+            request, tracked, error="No mapping could be worked out from the timeline."
+        )
+
+    source, target = suggestion
+    mapping, created = PathMapping.objects.get_or_create(
+        source_prefix=source,
+        target_prefix=target,
+        defaults={"note": f"Suggested from {tracked.display_title}"},
+    )
+    from core.rules.engine import diagnose_request
+
+    diagnose_request(tracked)
+    tracked.refresh_from_db()
+
+    return _action_result(
+        request,
+        tracked,
+        message=(
+            f"{'Added' if created else 'Already had'} the mapping "
+            f"{mapping.source_prefix} → {mapping.target_prefix}. "
+            "It takes effect on the next check."
+        ),
+    )
+
+
 # ----------------------------------------------------------------------------- actions
 
 
@@ -611,6 +689,7 @@ def _action_result(request, tracked, *, message: str = "", error: str = ""):
         diagnose_request(tracked)
         tracked.refresh_from_db()
 
+    diagnosis = getattr(tracked, "diagnosis", None)
     context = {
         "tracked": tracked,
         "remove": describe_remove(tracked),
@@ -618,6 +697,8 @@ def _action_result(request, tracked, *, message: str = "", error: str = ""):
         "action_message": message,
         "action_error": error,
         "actions": tracked.actions.all()[:10],
+        "diagnosis_code": diagnosis.code if diagnosis else "",
+        "explainable": EXPLAINABLE_CODES,
     }
     if request.headers.get("HX-Request"):
         return render(request, "core/_actions.html", context)

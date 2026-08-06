@@ -1,0 +1,47 @@
+{# Why nothing is being grabbed, in the *arr's own words. #}
+<div id="search-report">
+  {% if not report.ok %}
+    <div class="notice notice-error">{{ report.error }}</div>
+
+  {% else %}
+    <div class="notice {% if report.all_rejected %}notice-error{% else %}notice-ok{% endif %}">
+      {{ report.summary }}
+    </div>
+
+    {% if report.groups %}
+      <p class="hint" style="margin-top:0">
+        Grouped by the reason Sonarr/Radarr gave. The biggest group is usually the
+        setting worth changing.
+      </p>
+      <table class="mini">
+        <tbody>
+          {% for g in report.groups %}
+          <tr>
+            <td class="num" style="width:52px">
+              <span class="reject-count">{{ g.count }}</span>
+            </td>
+            <td>
+              <div class="action-title">{{ g.reason }}</div>
+              {% if g.hint %}<div class="hint">{{ g.hint }}</div>{% endif %}
+              {% if g.examples %}
+                <details class="what-happens">
+                  <summary>example releases</summary>
+                  <ul>{% for e in g.examples %}<li class="path">{{ e }}</li>{% endfor %}</ul>
+                </details>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    {% if report.total %}
+      <p class="hint">
+        Searched every enabled indexer just now and found {{ report.total }}
+        release{{ report.total|pluralize }}. This is the same search the *arr's own
+        Interactive Search runs.
+      </p>
+    {% endif %}
+  {% endif %}
+</div>

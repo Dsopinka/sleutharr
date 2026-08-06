@@ -12,6 +12,42 @@
     <div class="notice notice-error">{{ action_error }}</div>
   {% endif %}
 
+  {% if diagnosis_code == 'PATH_MISMATCH' %}
+    <form method="post" action="{% url 'apply_suggested_mapping' tracked.pk %}"
+          hx-post="{% url 'apply_suggested_mapping' tracked.pk %}"
+          hx-target="#actions" hx-swap="outerHTML" class="action-row">
+      {% csrf_token %}
+      <div class="action-target">
+        <div class="action-title">Add the folder mapping for me</div>
+        <div class="hint">
+          Changes only Sleutharr's own settings. Nothing in Plex or the *arr is touched.
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Add mapping</button>
+    </form>
+  {% endif %}
+
+  {% if diagnosis_code in explainable %}
+    <div class="action-row">
+      <div class="action-target">
+        <div class="action-title">Why is nothing being found?</div>
+        <div class="hint">
+          Asks your indexers now and shows the exact reason each release was rejected.
+          Takes a few seconds.
+        </div>
+      </div>
+      <button class="btn" type="button"
+              hx-post="{% url 'why_nothing_found' tracked.pk %}"
+              hx-target="#search-report" hx-swap="outerHTML"
+              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+              hx-indicator="#why-spin">
+        Find out
+      </button>
+      <span id="why-spin" class="htmx-indicator hint">Searching indexers…</span>
+    </div>
+    <div id="search-report"></div>
+  {% endif %}
+
   {% if remove.can_act %}
     {% for target in remove.targets %}
     <form method="post" action="{% url 'action_remove' tracked.pk %}"
