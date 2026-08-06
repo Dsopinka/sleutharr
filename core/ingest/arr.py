@@ -93,7 +93,7 @@ def _resolve_entity(
     client: ArrClient,
     service: ServiceInstance,
     tracked: TrackedRequest,
-    profiles: dict[int, str],
+    profiles: dict[int, dict],
 ) -> None:
     entity = None
 
@@ -134,9 +134,9 @@ def _resolve_entity(
     tracked.arr_title_slug = str(entity.get("titleSlug") or tracked.arr_title_slug)
     tracked.arr_monitored = bool(entity.get("monitored"))
     tracked.arr_quality_profile_id = entity.get("qualityProfileId")
-    tracked.arr_quality_profile_name = profiles.get(
-        entity.get("qualityProfileId") or -1, ""
-    )
+    profile = profiles.get(entity.get("qualityProfileId") or -1) or {}
+    tracked.arr_quality_profile_name = profile.get("name", "")
+    tracked.arr_cutoff_resolution = profile.get("cutoff_resolution")
     tracked.arr_snapshot = entity
     tracked.arr_last_synced = timezone.now()
 

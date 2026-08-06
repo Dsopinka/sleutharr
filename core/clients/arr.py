@@ -111,6 +111,40 @@ class ArrQueueItem:
         return out
 
 
+def _cutoff_resolution(profile: dict) -> int | None:
+    """Resolution of a profile's cutoff quality.
+
+    `items` is a flat list of qualities mixed with named groups that nest more
+    qualities, and `cutoff` refers to either by id. Groups carry no resolution of their
+    own, so the resolution comes from whichever member quality is found first.
+    """
+    cutoff_id = profile.get("cutoff")
+    if cutoff_id is None:
+        return None
+
+    def search(items: list) -> int | None:
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            quality = item.get("quality") or {}
+            nested = item.get("items") or []
+            # A group matches on the item id; a plain quality on the quality id.
+            if item.get("id") == cutoff_id or quality.get("id") == cutoff_id:
+                if quality.get("resolution") is not None:
+                    return int(quality["resolution"])
+                for child in nested:
+                    child_quality = (child or {}).get("quality") or {}
+                    if child_quality.get("resolution") is not None:
+                        return int(child_quality["resolution"])
+                return None
+            found = search(nested)
+            if found is not None:
+                return found
+        return None
+
+    return search(profile.get("items") or [])
+
+
 def _dt(value: Any) -> datetime | None:
     if not value:
         return None
@@ -267,15 +301,26 @@ class ArrClient(BaseClient):
 
     # -- quality profiles ------------------------------------------------------
 
-    def quality_profiles(self) -> dict[int, str]:
+    def quality_profiles(self) -> dict[int, dict]:
+        """{profile id: {name, cutoff_resolution}}.
+
+        The cutoff's *resolution* matters more than its rank. A profile whose cutoff is
+        Bluray-2160p marks a WEBDL-2160p file as "cutoff not met", but both are 4K -- the
+        difference is source, which is a preference, not a fault worth reporting. Only a
+        genuine drop in resolution is.
+        """
         data = self.get_json("/qualityprofile")
         if not isinstance(data, list):
             return {}
-        return {
-            int(p["id"]): str(p.get("name") or "")
-            for p in data
-            if isinstance(p, dict) and p.get("id") is not None
-        }
+        out: dict[int, dict] = {}
+        for profile in data:
+            if not isinstance(profile, dict) or profile.get("id") is None:
+                continue
+            out[int(profile["id"])] = {
+                "name": str(profile.get("name") or ""),
+                "cutoff_resolution": _cutoff_resolution(profile),
+            }
+        return out
 
     # -- deep links ------------------------------------------------------------
 

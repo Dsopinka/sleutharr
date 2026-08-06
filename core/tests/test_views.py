@@ -180,3 +180,31 @@ class HealthzTests(TestCase):
             make_service(ServiceKind.RADARR, name=f"Radarr {i}")
         with self.assertNumQueries(1):
             self.client.get(reverse("healthz"))
+
+
+class TimelineCollapseTests(TestCase):
+    """Sonarr emits one row per episode, so a season-pack grab is eight identical lines."""
+
+    def setUp(self):
+        self.radarr = make_service(ServiceKind.RADARR, name="Sonarr")
+        self.seerr = make_service(
+            ServiceKind.REQUEST_MANAGER, name="Seerr", variant=ServiceVariant.SEERR
+        )
+        self.request_ = make_request(service=self.seerr, arr_service=self.radarr)
+
+    def test_identical_consecutive_events_collapse(self):
+        for _ in range(8):
+            add_event(self.request_, EventType.GRABBED, hours_ago=10, summary="Grabbed S05")
+        response = self.client.get(reverse("request_detail", args=[self.request_.pk]))
+        self.assertContains(response, "&times;8")
+        # One row, not eight.
+        self.assertEqual(response.content.count(b"Grabbed S05"), 1)
+
+    def test_different_events_are_not_merged(self):
+        add_event(self.request_, EventType.GRABBED, hours_ago=10, summary="Grabbed A")
+        add_event(self.request_, EventType.DOWNLOAD_FAILED, hours_ago=9, summary="Failed A")
+        add_event(self.request_, EventType.GRABBED, hours_ago=8, summary="Grabbed A")
+        response = self.client.get(reverse("request_detail", args=[self.request_.pk]))
+        # A genuine grab -> fail -> grab cycle must still read as three things.
+        self.assertEqual(response.content.count(b"Grabbed A"), 2)
+        self.assertNotContains(response, "&times;2")

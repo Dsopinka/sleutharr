@@ -505,3 +505,15 @@ table.discovery input[type=checkbox] { width: auto; }
   color: var(--text-dim);
 }
 .server-picker { margin-top: 10px; }
+
+/* A collapsed run of identical events -- one season-pack grab is eight history rows. */
+.repeat {
+  font-size: 11px;
+  color: var(--text-faint);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 0 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}

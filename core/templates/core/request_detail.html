@@ -94,7 +94,10 @@
 <div class="timeline">
   {% for e in events %}
   <div class="tl-row {% if e.is_evidence %}evidence{% endif %}">
-    <div class="tl-time">{{ e.occurred_at|date:"j M Y H:i" }}</div>
+    <div class="tl-time">
+      {{ e.occurred_at|date:"j M Y H:i" }}
+      {% if e.repeat_until %}<div class="hint">to {{ e.repeat_until|date:"H:i" }}</div>{% endif %}
+    </div>
     <div class="tl-lane lane-{{ e.source_kind }}">
       {{ e.get_source_kind_display }}
       {% if e.service %}<div style="color:var(--text-faint);text-transform:none;letter-spacing:0">{{ e.service.name }}</div>{% endif %}
@@ -103,6 +106,7 @@
       <div class="summary">
         {% if e.is_evidence %}<span class="badge badge-warning" style="margin-right:6px">evidence</span>{% endif %}
         {{ e.summary }}
+        {% if e.repeat_count > 1 %}<span class="repeat">&times;{{ e.repeat_count }}</span>{% endif %}
       </div>
       {% if e.detail %}<div class="detail">{{ e.detail }}</div>{% endif %}
       {% if e.raw %}

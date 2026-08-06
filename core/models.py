@@ -269,6 +269,10 @@ class TrackedRequest(models.Model):
     arr_has_file = models.BooleanField(null=True, blank=True)
     arr_quality_profile_id = models.IntegerField(null=True, blank=True)
     arr_quality_profile_name = models.CharField(max_length=128, blank=True)
+    # Vertical resolution of the profile's cutoff. Compared against what actually landed,
+    # because "cutoff not met" is true for most well-configured libraries and only a drop
+    # in resolution is worth reporting.
+    arr_cutoff_resolution = models.IntegerField(null=True, blank=True)
     arr_snapshot = models.JSONField(default=dict, blank=True)
     arr_last_synced = models.DateTimeField(null=True, blank=True)
 

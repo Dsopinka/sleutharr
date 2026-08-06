@@ -28,15 +28,28 @@ class WrongQuality(Rule):
         if not raw.get("qualityCutoffNotMet"):
             return None
 
-        quality = (
-            ((raw.get("quality") or {}).get("quality") or {}).get("name") or "unknown"
-        )
+        quality_obj = (raw.get("quality") or {}).get("quality") or {}
+        quality = quality_obj.get("name") or "unknown"
+
+        # `qualityCutoffNotMet` is true for most well-configured libraries: a profile
+        # whose cutoff is Bluray-2160p flags a perfectly good WEBDL-2160p file. Reporting
+        # that as a fault buries the real cases in noise, so the resolution has to have
+        # actually dropped. WEBDL vs Bluray at the same resolution is a source preference,
+        # not something to send someone to investigate.
+        landed = quality_obj.get("resolution")
+        wanted = ctx.request.arr_cutoff_resolution
+        if landed is not None and wanted is not None and int(landed) >= int(wanted):
+            return None
         profile = ctx.request.arr_quality_profile_name or "the configured profile"
         service = ctx.request.arr_service
         name = service.name if service else "the library"
 
+        drop = ""
+        if landed is not None and wanted is not None:
+            drop = f" You asked for at least {wanted}p and got {landed}p."
+
         return self.verdict(
-            f"Imported at {quality}, which is below the cutoff for {profile}. "
+            f"Imported at {quality}, which is below the cutoff for {profile}.{drop} "
             f"It is playable, so nothing upstream flags it — but {name} will keep "
             f"searching for an upgrade, and it may never find one.",
             next_step=(

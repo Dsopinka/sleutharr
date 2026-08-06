@@ -610,3 +610,96 @@ class NoMediaServerConfiguredTests(RuleTestCase):
         service.save()
         verdict = self.verdict_for(request)
         self.assertNotEqual(getattr(verdict, "code", None), "NOT_IN_MEDIA_SERVER")
+
+
+class QualityNoiseTests(RuleTestCase):
+    """Found on a live instance: a 2160p HDR WEB-DL was reported as a quality problem.
+
+    `qualityCutoffNotMet` is true for most well-configured libraries -- a cutoff of
+    Bluray-2160p flags every WEBDL-2160p file. Only a real drop in resolution matters.
+    """
+
+    def _imported(self, resolution, cutoff, name="WEBDL-2160p"):
+        request = make_request(
+            service=self.seerr, arr_service=self.radarr, has_file=True
+        )
+        request.media_server_found = True
+        request.arr_cutoff_resolution = cutoff
+        request.save()
+        add_event(
+            request,
+            EventType.IMPORTED,
+            hours_ago=5,
+            raw={
+                "qualityCutoffNotMet": True,
+                "quality": {"quality": {"name": name, "resolution": resolution}},
+            },
+        )
+        return request
+
+    def test_same_resolution_below_cutoff_is_not_reported(self):
+        """WEBDL-2160p under a Bluray-2160p cutoff is a source preference, not a fault."""
+        verdict = self.verdict_for(self._imported(2160, 2160))
+        self.assertNotEqual(getattr(verdict, "code", None), "WRONG_QUALITY")
+
+    def test_higher_resolution_than_cutoff_is_not_reported(self):
+        verdict = self.verdict_for(self._imported(2160, 1080))
+        self.assertNotEqual(getattr(verdict, "code", None), "WRONG_QUALITY")
+
+    def test_genuine_resolution_drop_still_fires(self):
+        verdict = self.verdict_for(self._imported(480, 1080, name="SDTV"))
+        self.assertEqual(verdict.code, "WRONG_QUALITY")
+        self.assertIn("480p", verdict.message)
+        self.assertIn("1080p", verdict.message)
+
+    def test_unknown_cutoff_falls_back_to_the_arr_flag(self):
+        """With no cutoff resolution known, trust the *arr rather than stay silent."""
+        verdict = self.verdict_for(self._imported(720, None, name="HDTV-720p"))
+        self.assertEqual(verdict.code, "WRONG_QUALITY")
+
+
+class SeasonPackCountingTests(RuleTestCase):
+    """Sonarr writes one history row per episode.
+
+    A single failed season pack therefore produces one row per episode, which counted
+    naively trips a loop threshold of 3 on the very first failure.
+    """
+
+    def _season_pack_failure(self, request, download_id, episodes=8, hours_ago=10):
+        for index in range(episodes):
+            add_event(
+                request,
+                EventType.DOWNLOAD_FAILED,
+                hours_ago=hours_ago,
+                raw={
+                    "downloadId": download_id,
+                    "sourceTitle": "Some.Show.S05.2160p.WEB-DL-GROUP",
+                },
+            )
+
+    def test_one_failed_season_pack_is_not_a_loop(self):
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        self._season_pack_failure(request, "AAAA")
+        verdict = self.verdict_for(request)
+        self.assertNotEqual(getattr(verdict, "code", None), "BLOCKLIST_LOOP")
+
+    def test_three_distinct_attempts_still_trip_it(self):
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        for i, download_id in enumerate(["AAAA", "BBBB", "CCCC"]):
+            self._season_pack_failure(request, download_id, hours_ago=20 - i * 4)
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "BLOCKLIST_LOOP")
+        # Reports attempts, not the 24 underlying rows.
+        self.assertIn("3 failure(s)", verdict.message)
+
+    def test_missing_download_id_falls_back_to_release_and_day(self):
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        for i in range(3):
+            add_event(
+                request,
+                EventType.DOWNLOAD_FAILED,
+                hours_ago=60 - i * 24,
+                raw={"sourceTitle": f"Release.{i}-GROUP"},
+            )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "BLOCKLIST_LOOP")

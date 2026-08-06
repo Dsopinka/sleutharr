@@ -87,6 +87,35 @@ def dashboard(request):
     return render(request, "core/dashboard.html", context)
 
 
+def _collapse_repeats(events: list) -> list:
+    """Fold runs of identical events into one row.
+
+    Sonarr writes one history row per episode, so a single season-pack grab appears as
+    eight identical "Grabbed ..." lines that bury everything around them. They are all
+    the same event as far as a reader is concerned, so show it once and say how many.
+
+    Only consecutive runs of the same summary collapse, so a genuine grab -> fail -> grab
+    sequence still reads as three separate things.
+    """
+    collapsed: list = []
+    for event in events:
+        previous = collapsed[-1] if collapsed else None
+        if (
+            previous is not None
+            and previous.summary == event.summary
+            and previous.event_type == event.event_type
+        ):
+            previous.repeat_count = getattr(previous, "repeat_count", 1) + 1
+            previous.repeat_until = event.occurred_at
+            # A collapsed run counts as evidence if any member did.
+            previous.is_evidence = previous.is_evidence or event.is_evidence
+            continue
+        event.repeat_count = 1
+        event.repeat_until = None
+        collapsed.append(event)
+    return collapsed
+
+
 def request_detail(request, pk: int):
     tracked = get_object_or_404(
         TrackedRequest.objects.select_related("service", "arr_service", "diagnosis"), pk=pk
@@ -110,6 +139,8 @@ def request_detail(request, pk: int):
     for event in events:
         event.is_evidence = event.id in evidence_ids
         event.raw_json = json.dumps(event.raw, indent=2, sort_keys=True, default=str)
+
+    events = _collapse_repeats(events)
 
     return render(
         request,
