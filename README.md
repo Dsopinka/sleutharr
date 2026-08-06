@@ -90,7 +90,17 @@ timeline events it was derived from.
 
 ## Install
 
-### Docker Compose
+### Docker
+
+```bash
+docker run -d --name sleutharr \
+  -p 8080:8080 \
+  -e PUID=1000 -e PGID=1000 -e TZ=Etc/UTC \
+  -v ./config:/config \
+  ghcr.io/dsopinka/sleutharr:latest
+```
+
+Or with compose, which builds from source instead of pulling:
 
 ```bash
 docker compose up -d
@@ -102,17 +112,18 @@ Then open `http://localhost:8080` and add your services on the Settings page.
 
 **→ [Full Unraid install guide](docs/unraid.md)**
 
-Sleutharr is not published to a registry, so there is nothing to pull. Build the amd64
-image and ship it to the server in one step:
+**Docker → Add Container**, then:
 
-```bash
-docker buildx build --platform linux/amd64 -t sleutharr:latest --load .
-docker save sleutharr:latest | gzip | ssh root@TOWER 'gunzip | docker load'
-```
+| Field | Value |
+|---|---|
+| Repository | `ghcr.io/dsopinka/sleutharr:latest` |
+| Port | `8080` → `8080` |
+| Path | `/config` → `/mnt/user/appdata/sleutharr` |
+| Variables | `PUID=99`, `PGID=100`, `TZ=…` |
 
-Then add the container using [`unraid/sleutharr.xml`](unraid/sleutharr.xml), or by hand
-with repository `sleutharr:latest`, port `8080`, path `/config` →
-`/mnt/user/appdata/sleutharr`, and `PUID=99` / `PGID=100` / `TZ`.
+Or drop [`unraid/sleutharr.xml`](unraid/sleutharr.xml) into
+`/boot/config/plugins/dockerMan/templates-user/` and pick it from the template list.
+Updates are **Check for Updates → Apply**.
 
 The guide covers the details that actually bite: why `localhost` in a service URL never
 works from inside the container, routing 4K requests to the right instance, and naming

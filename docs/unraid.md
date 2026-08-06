@@ -1,84 +1,39 @@
 # Installing on Unraid
 
-Sleutharr is not published to Docker Hub or GHCR, so there is nothing to pull. You get the
-image onto the server one of two ways, then add a container that uses it.
+The image is published to GitHub Container Registry, so Unraid installs it like any other
+container — no terminal, no file transfer, no building.
 
-Everything below was verified against a real `linux/amd64` image built and run for this
-purpose — Unraid is amd64, so that is the architecture that matters. See
-[What was verified](#what-was-verified) for exactly how far that testing went.
+```
+ghcr.io/dsopinka/sleutharr:latest
+```
+
+Built for `linux/amd64` (Unraid's architecture) by CI on every push to `main`, and only
+after the full test suite passes.
 
 ---
 
-## Step 1 — get the image onto the server
-
-### Option A: build here, ship the image (recommended)
-
-One command from the project directory on your Mac. No build tools needed on Unraid, and
-it transfers about 58 MB.
-
-```bash
-docker buildx build --platform linux/amd64 -t sleutharr:latest --load .
-```
-
-Then push it straight into Unraid's Docker over SSH:
-
-```bash
-docker save sleutharr:latest | gzip | ssh root@TOWER 'gunzip | docker load'
-```
-
-Replace `TOWER` with your server's hostname or IP. SSH must be enabled (Settings →
-Management Access). You will be prompted for the root password.
-
-Confirm it landed:
-
-```bash
-ssh root@TOWER 'docker images sleutharr'
-```
-
-### Option B: build on the Unraid server
-
-Useful if you would rather not build on a Mac at all, or want to rebuild after editing.
-Copy the source over, then build in place:
-
-```bash
-rsync -av --exclude .venv --exclude config --exclude .git ./ root@TOWER:/mnt/user/appdata/sleutharr-src/
-ssh root@TOWER 'cd /mnt/user/appdata/sleutharr-src && docker build -t sleutharr:latest .'
-```
-
-The build takes a few minutes and needs internet on the server to fetch the base image
-and pip packages.
-
-> Build it on the array or a cache share as shown, not in `/tmp` or `/root` — those live
-> in RAM on Unraid and a build there can exhaust memory.
-
----
-
-## Step 2 — add the container
+## Step 1 — add the container
 
 ### Using the template
 
-Copy [`unraid/sleutharr.xml`](../unraid/sleutharr.xml) to the server's private template
-directory:
+Copy [`unraid/sleutharr.xml`](../unraid/sleutharr.xml) into the server's private template
+directory, via any SMB share or the file manager:
 
-```bash
-scp unraid/sleutharr.xml root@TOWER:/boot/config/plugins/dockerMan/templates-user/my-sleutharr.xml
+```
+/boot/config/plugins/dockerMan/templates-user/my-sleutharr.xml
 ```
 
-Then in the Unraid web UI: **Docker → Add Container → Template → my-sleutharr**. The
-fields arrive pre-filled; review them and click **Apply**.
-
-The template's repository is the local tag `sleutharr:latest`, which is why step 1 has to
-happen first. If Unraid reports a pull failure but the image is present in
-`docker images`, the container still creates correctly — Unraid uses the local image.
+Then **Docker → Add Container → Template → my-sleutharr**. Fields arrive pre-filled;
+review and click **Apply**.
 
 ### Or add it by hand
 
-**Docker → Add Container**, switch to *Advanced view*, and fill in:
+**Docker → Add Container**, switch to *Advanced view*:
 
 | Field | Value |
 |---|---|
 | Name | `Sleutharr` |
-| Repository | `sleutharr:latest` |
+| Repository | `ghcr.io/dsopinka/sleutharr:latest` |
 | Network Type | `Bridge` |
 | WebUI | `http://[IP]:[PORT:8080]/` |
 
@@ -94,12 +49,15 @@ Add three **Variables**:
 | `PGID` | `100` |
 | `TZ` | your timezone, e.g. `America/New_York` |
 
-`99:100` is Unraid's `nobody:users`, which is what owns `/mnt/user` — the entrypoint
-remaps the container's user to match so the database is not written as root.
+`99:100` is Unraid's `nobody:users`, which owns `/mnt/user` — the entrypoint remaps the
+container's user to match so the database is not written as root.
+
+Click **Apply**. Unraid pulls the image and starts it. First boot runs migrations and
+takes a few seconds.
 
 ---
 
-## Step 3 — configure
+## Step 2 — configure
 
 Open `http://TOWER:8080`. Nothing is configured yet, by design: **every service URL and
 API key lives in the web UI**, not in environment variables.
@@ -139,13 +97,15 @@ pair to paste in.
 
 ---
 
-## Step 4 — confirm it is seeing your setup
+## Step 3 — confirm it is seeing your setup
 
 Once services are configured, this prints the field names each one actually returns:
 
 ```bash
 docker exec Sleutharr python manage.py probe_services --verify
 ```
+
+Run it from Unraid's web terminal (the `>_` icon, top right) — no SSH needed.
 
 That is the fastest way to confirm `docs/api-notes.md` against your real instances,
 including whether the 4K-suffixed keys are present on your request manager.
@@ -154,15 +114,14 @@ including whether the 4K-suffixed keys are present on your request manager.
 
 ## Updating
 
-Rebuild and reship, then recreate the container from the Unraid UI:
+**Docker → Check for Updates → Apply**. That is the whole procedure.
 
-```bash
-docker buildx build --platform linux/amd64 -t sleutharr:latest --load .
-docker save sleutharr:latest | gzip | ssh root@TOWER 'gunzip | docker load'
-```
+Pushing to `main` rebuilds and republishes `:latest` automatically, so Unraid sees the
+new image on its next check. Your data lives in `/mnt/user/appdata/sleutharr` and is
+untouched; migrations run automatically on start.
 
-Your data is in `/mnt/user/appdata/sleutharr` and is untouched by this. Migrations run
-automatically on start.
+To pin a version instead of tracking `latest`, tag a release (`git tag v2.0.0 && git push
+--tags`) and point the Repository field at `ghcr.io/dsopinka/sleutharr:2.0.0`.
 
 ---
 
@@ -179,17 +138,17 @@ an *arr that only listens on a specific interface. Use the LAN IP.
 Radarr configured to trace past the request manager. Check that the request manager
 service id is set if you run several instances.
 
-**Permission errors in the log.** Check `PUID`/`PGID` are `99`/`100` and that
-`/mnt/user/appdata/sleutharr` is not owned by root:
+**Permission errors in the log.** Check `PUID`/`PGID` are `99`/`100` and that the appdata
+folder is not owned by root. From the web terminal:
 
 ```bash
-ssh root@TOWER 'ls -ln /mnt/user/appdata/sleutharr && chown -R 99:100 /mnt/user/appdata/sleutharr'
+chown -R 99:100 /mnt/user/appdata/sleutharr
 ```
 
-**Logs:**
+**Logs.** Click the container in the Docker tab → **Logs**, or from the web terminal:
 
 ```bash
-ssh root@TOWER 'docker logs --tail 100 Sleutharr'
+docker logs --tail 100 Sleutharr
 ```
 
 ---
@@ -205,6 +164,5 @@ The `linux/amd64` image was built and run for this guide. Confirmed on it:
 - passes all 149 tests **inside the image**;
 - reaches `healthy` with no errors in the log.
 
-Not verified: this guide's SSH and Unraid-UI steps were not executed against a real Unraid
-server — no such machine was reachable. They are standard Unraid procedure, but the exact
-click path may differ slightly by Unraid version.
+Not verified: the Unraid UI steps were not executed against a real Unraid server. They are
+standard Unraid procedure, but the exact click path may differ slightly by version.

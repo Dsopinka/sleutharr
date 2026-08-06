@@ -1,16 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Sleutharr</Name>
-  <!-- Local image tag. Sleutharr is not published to a registry, so load or build the
-       image on the server first (see README, Install on Unraid) and leave this as-is. -->
-  <Repository>sleutharr:latest</Repository>
-  <Registry/>
+  <Repository>ghcr.io/dsopinka/sleutharr:latest</Repository>
+  <Registry>https://github.com/Dsopinka/sleutharr/pkgs/container/sleutharr</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support/>
-  <Project/>
+  <Support>https://github.com/Dsopinka/sleutharr/issues</Support>
+  <Project>https://github.com/Dsopinka/sleutharr</Project>
   <Overview>
     Sleutharr answers one question: "I requested this - where did it die?"
 
