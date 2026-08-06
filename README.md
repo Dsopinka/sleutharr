@@ -155,6 +155,19 @@ the web UI** and stored in SQLite.
 
 ## Configuration
 
+### Media server
+
+**Settings → Media server → Sign in with Plex.** A Plex window opens, you approve it, and
+your servers are listed to pick from — no `X-Plex-Token` to dig out of an XML response.
+Sleutharr stores the *server-scoped* token from that list rather than your account token,
+and prefers your LAN address over Plex's relay.
+
+Jellyfin and Emby have no such flow, so they take a username and password instead. The
+password is used once to obtain an access key and then discarded; only the key is stored.
+
+Signing in with Plex is the one feature that needs outbound internet, since the PIN flow
+goes through plex.tv. Everything else stays on your network.
+
 ### Services
 
 Add one request manager, then each Sonarr/Radarr instance, your download clients, and your
@@ -319,7 +332,7 @@ Then add it to `RULES` in `core/rules/__init__.py`, in priority order.
 SLEUTHARR_CONFIG_DIR=./config SLEUTHARR_SCHEDULER=0 .venv/bin/python manage.py test core
 ```
 
-149 tests, no live calls — client parsing runs against recorded fixtures in
+197 tests, no live calls — client parsing runs against recorded fixtures in
 `core/tests/fixtures/`, and the ingestion tests use `httpx.MockTransport`. There are no
 test-only dependencies.
 

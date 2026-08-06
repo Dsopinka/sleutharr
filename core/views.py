@@ -241,6 +241,9 @@ def settings_page(request):
             "tunables": tunables,
             "flags": flags,
             "recent_actions": ActionLog.objects.all()[:20],
+            "media_servers": ServiceInstance.objects.filter(
+                kind=ServiceKind.MEDIA_SERVER
+            ),
         },
     )
 
@@ -411,6 +414,128 @@ def discover_apply(request):
         request,
         "core/_discovery.html",
         {"applied": summary, "errors": failed, "ran": True, "candidates": []},
+    )
+
+
+# ------------------------------------------------------------------------ media server
+
+
+@require_POST
+def plex_start(request):
+    """Begin the Plex PIN sign-in and hand back the URL to authorise at."""
+    from core.signin import SignInError, start_plex_signin
+
+    try:
+        pin = start_plex_signin()
+    except SignInError as exc:
+        return JsonResponse({"ok": False, "detail": str(exc)})
+    return JsonResponse({"ok": True, "pin_id": pin.pin_id, "auth_url": pin.auth_url})
+
+
+@require_POST
+def plex_poll(request):
+    """Check whether the user has finished authorising, and list their servers."""
+    from core.signin import SignInError, plex_servers, poll_plex_pin
+
+    try:
+        pin_id = int(request.POST.get("pin_id") or 0)
+    except ValueError:
+        pin_id = 0
+    if not pin_id:
+        return JsonResponse({"ok": False, "detail": "Sign-in was not started."})
+
+    try:
+        token = poll_plex_pin(pin_id)
+    except SignInError as exc:
+        return JsonResponse({"ok": False, "detail": str(exc)})
+
+    if not token:
+        return JsonResponse({"ok": True, "waiting": True})
+
+    try:
+        servers = plex_servers(token)
+    except SignInError as exc:
+        return JsonResponse({"ok": False, "detail": str(exc)})
+
+    if not servers:
+        return JsonResponse(
+            {
+                "ok": False,
+                "detail": "Signed in, but that account has no Plex servers on it.",
+            }
+        )
+
+    return render(
+        request,
+        "core/_plex_servers.html",
+        {"servers": servers, "variant": ServiceVariant.PLEX},
+    )
+
+
+@require_POST
+def media_server_save(request):
+    """Save the media server the user picked, or signed into."""
+    from core.signin import DiscoveredServer, SignInError, jellyfin_signin, save_media_server
+
+    variant = request.POST.get("variant") or ServiceVariant.PLEX
+
+    if variant == ServiceVariant.PLEX:
+        base_url = (request.POST.get("base_url") or "").strip()
+        token = (request.POST.get("token") or "").strip()
+        if not base_url or not token:
+            return _media_server_result(request, error="Pick a server first.")
+        server = DiscoveredServer(
+            name=(request.POST.get("name") or "Plex").strip(),
+            base_url=base_url,
+            token=token,
+        )
+    else:
+        try:
+            server = jellyfin_signin(
+                request.POST.get("base_url", ""),
+                request.POST.get("username", ""),
+                request.POST.get("password", ""),
+                variant,
+            )
+        except SignInError as exc:
+            return _media_server_result(request, error=str(exc))
+
+    service = save_media_server(server, variant)
+
+    # Prove the stored credentials actually work before claiming success -- a token that
+    # authenticates to plex.tv can still fail against the server itself.
+    detail = ""
+    try:
+        with client_for(service) as probe_client:
+            probe = probe_client.checked_probe()
+        detail = probe.detail if probe.ok else ""
+        if not probe.ok:
+            return _media_server_result(
+                request,
+                error=(
+                    f"Saved {service.name}, but it did not answer: {probe.detail}. "
+                    "Check the address on the Health page."
+                ),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-signin probe failed for %s: %s", service.name, exc)
+
+    return _media_server_result(
+        request, message=f"Connected to {service.name}. {detail}".strip()
+    )
+
+
+def _media_server_result(request, *, message: str = "", error: str = ""):
+    return render(
+        request,
+        "core/_media_server.html",
+        {
+            "message": message,
+            "error": error,
+            "media_servers": ServiceInstance.objects.filter(
+                kind=ServiceKind.MEDIA_SERVER
+            ),
+        },
     )
 
 

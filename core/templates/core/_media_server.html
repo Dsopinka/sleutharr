@@ -1,0 +1,150 @@
+{# Account-based media server linking. No token hunting. #}
+<div id="media-server">
+  {% if message %}<div class="notice notice-ok">{{ message }}</div>{% endif %}
+  {% if error %}<div class="notice notice-error">{{ error }}</div>{% endif %}
+
+  {% if media_servers %}
+    <table class="mini">
+      <tbody>
+        {% for s in media_servers %}
+        <tr>
+          <td>
+            <div class="action-title">{{ s.name }}</div>
+            <div class="hint">{{ s.get_variant_display }} &middot; {{ s.base_url }}</div>
+          </td>
+          <td class="nowrap">
+            {% if s.consecutive_failures %}
+              <span class="badge badge-error">not answering</span>
+            {% elif s.last_seen_ok %}
+              <span class="badge badge-ok">connected</span>
+            {% else %}
+              <span class="badge badge-warning">not checked yet</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">Signing in again replaces the saved connection.</p>
+  {% else %}
+    <p class="hint" style="margin-top:0">
+      Adding your media server lets Sleutharr tell “it downloaded but never showed up”
+      apart from “it never downloaded”. Without one, it simply will not comment on
+      whether something reached your library.
+    </p>
+  {% endif %}
+
+  <div class="signin-choices">
+    {# --- Plex --------------------------------------------------------------- #}
+    <div class="signin-card">
+      <div class="signin-title">Plex</div>
+      <p class="hint">
+        Sign in with your Plex account and pick your server. No token to find.
+      </p>
+      <button class="btn btn-primary" type="button" id="plex-signin">Sign in with Plex</button>
+      <span id="plex-status" class="hint"></span>
+      <div id="plex-servers"></div>
+      <p class="hint" style="margin-top:8px">
+        Needs internet access to plex.tv. Everything else Sleutharr does stays on your
+        network.
+      </p>
+    </div>
+
+    {# --- Jellyfin / Emby ---------------------------------------------------- #}
+    <div class="signin-card">
+      <div class="signin-title">Jellyfin or Emby</div>
+      <form method="post" action="{% url 'media_server_save' %}"
+            hx-post="{% url 'media_server_save' %}"
+            hx-target="#media-server" hx-swap="outerHTML">
+        {% csrf_token %}
+        <div class="field">
+          <label>Address</label>
+          <input type="text" name="base_url" placeholder="192.168.1.10:8096" required>
+        </div>
+        <div class="grid grid-2">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" name="username" autocomplete="off" required>
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" name="password" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="field">
+          <label>Which one?</label>
+          <select name="variant">
+            <option value="jellyfin">Jellyfin</option>
+            <option value="emby">Emby</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+        <p class="hint" style="margin-top:8px">
+          Your password is used once to get an access key, then discarded. Only the key
+          is stored.
+        </p>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var button = document.getElementById('plex-signin');
+  if (!button || button.dataset.wired) return;
+  button.dataset.wired = '1';
+
+  var status = document.getElementById('plex-status');
+  var slot = document.getElementById('plex-servers');
+  var csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+  var timer = null;
+
+  function post(url, data) {
+    var body = new URLSearchParams(data || {});
+    body.append('csrfmiddlewaretoken', csrf);
+    return fetch(url, {method: 'POST', body: body});
+  }
+
+  button.addEventListener('click', function () {
+    status.textContent = 'Opening Plex…';
+    slot.innerHTML = '';
+    post('{% url "plex_start" %}').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) { status.textContent = d.detail; return; }
+
+      // Popup, so the settings page keeps its state while they authorise.
+      var win = window.open(d.auth_url, 'plex-auth', 'width=600,height=740');
+      if (!win) { status.textContent = 'Allow popups for this site, then try again.'; return; }
+      status.textContent = 'Waiting for you to approve it in Plex…';
+
+      var tries = 0;
+      clearInterval(timer);
+      timer = setInterval(function () {
+        tries += 1;
+        if (tries > 100) {   // ~5 minutes
+          clearInterval(timer);
+          status.textContent = 'Timed out. Try again.';
+          return;
+        }
+        post('{% url "plex_poll" %}', {pin_id: d.pin_id}).then(function (r) {
+          var type = r.headers.get('content-type') || '';
+          if (type.indexOf('application/json') >= 0) {
+            return r.json().then(function (j) {
+              if (j.waiting) return;
+              clearInterval(timer);
+              status.textContent = j.detail || 'Sign-in failed.';
+            });
+          }
+          // Non-JSON means the server list rendered.
+          return r.text().then(function (html) {
+            clearInterval(timer);
+            status.textContent = '';
+            slot.innerHTML = html;
+            if (window.htmx) htmx.process(slot);
+            try { win.close(); } catch (e) {}
+          });
+        });
+      }, 3000);
+    });
+  });
+})();
+</script>

@@ -1,0 +1,31 @@
+{# Servers the signed-in Plex account can reach. Local addresses are ranked first. #}
+<div class="server-picker">
+  <p class="hint" style="margin:10px 0 6px">
+    Signed in. Pick the server Sleutharr should look in:
+  </p>
+  {% for s in servers %}
+  <form method="post" action="{% url 'media_server_save' %}"
+        hx-post="{% url 'media_server_save' %}"
+        hx-target="#media-server" hx-swap="outerHTML"
+        class="action-row">
+    {% csrf_token %}
+    <input type="hidden" name="variant" value="{{ variant }}">
+    <input type="hidden" name="name" value="{{ s.name }}">
+    <input type="hidden" name="token" value="{{ s.token }}">
+    <div class="action-target">
+      <div class="action-title">{{ s.name }}</div>
+      <div class="hint">
+        <select name="base_url" class="inline-select">
+          <option value="{{ s.base_url }}">{{ s.base_url }}</option>
+          {% for alt in s.alternatives %}<option value="{{ alt }}">{{ alt }}</option>{% endfor %}
+        </select>
+      </div>
+      {% if s.note %}<div class="hint">{{ s.note }}</div>{% endif %}
+    </div>
+    <button class="btn btn-primary" type="submit">Use this one</button>
+  </form>
+  {% endfor %}
+  <p class="hint">
+    The first address is the one on your own network, which is the one you usually want.
+  </p>
+</div>
