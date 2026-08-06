@@ -161,3 +161,22 @@ class HealthProbeTests(TestCase):
         self.assertContains(response, "failing")
         service.refresh_from_db()
         self.assertGreater(service.consecutive_failures, 0)
+
+
+class HealthzTests(TestCase):
+    def test_returns_ok_without_rendering_a_template(self):
+        response = self.client.get(reverse("healthz"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"ok")
+        self.assertEqual(response["Content-Type"], "text/plain")
+
+    def test_stays_cheap_as_services_are_added(self):
+        """The probe must not scale with the size of the setup.
+
+        It replaced a check that rendered the full /health/ page, whose cost grew with
+        every configured service and was timing out the container healthcheck.
+        """
+        for i in range(25):
+            make_service(ServiceKind.RADARR, name=f"Radarr {i}")
+        with self.assertNumQueries(1):
+            self.client.get(reverse("healthz"))

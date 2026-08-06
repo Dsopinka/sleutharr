@@ -9,6 +9,8 @@ urlpatterns = [
     path("request/<int:pk>/", views.request_detail, name="request_detail"),
     path("search/", views.search, name="search"),
     path("health/", views.health, name="health"),
+    # Container liveness probe -- see views.healthz for why it is not the page above.
+    path("healthz", views.healthz, name="healthz"),
     path("health/<int:pk>/probe/", views.probe_service, name="probe_service"),
     path("settings/", views.settings_page, name="settings"),
     path("settings/service/", views.service_save, name="service_create"),

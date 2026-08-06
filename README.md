@@ -100,11 +100,23 @@ Then open `http://localhost:8080` and add your services on the Settings page.
 
 ### Unraid
 
-The template is at [`unraid/sleutharr.xml`](unraid/sleutharr.xml). Add it as a private
-template, or point Community Applications at this repo.
+**→ [Full Unraid install guide](docs/unraid.md)**
 
-Defaults follow Unraid conventions: `/config` for appdata, `PUID=99`, `PGID=100`, port
-8080.
+Sleutharr is not published to a registry, so there is nothing to pull. Build the amd64
+image and ship it to the server in one step:
+
+```bash
+docker buildx build --platform linux/amd64 -t sleutharr:latest --load .
+docker save sleutharr:latest | gzip | ssh root@TOWER 'gunzip | docker load'
+```
+
+Then add the container using [`unraid/sleutharr.xml`](unraid/sleutharr.xml), or by hand
+with repository `sleutharr:latest`, port `8080`, path `/config` →
+`/mnt/user/appdata/sleutharr`, and `PUID=99` / `PGID=100` / `TZ`.
+
+The guide covers the details that actually bite: why `localhost` in a service URL never
+works from inside the container, routing 4K requests to the right instance, and naming
+usenet clients when you run more than one.
 
 ### From source
 
@@ -296,7 +308,7 @@ Then add it to `RULES` in `core/rules/__init__.py`, in priority order.
 SLEUTHARR_CONFIG_DIR=./config SLEUTHARR_SCHEDULER=0 .venv/bin/python manage.py test core
 ```
 
-147 tests, no live calls — client parsing runs against recorded fixtures in
+149 tests, no live calls — client parsing runs against recorded fixtures in
 `core/tests/fixtures/`, and the ingestion tests use `httpx.MockTransport`. There are no
 test-only dependencies.
 
@@ -331,10 +343,11 @@ no JS build step. htmx is vendored, so the UI needs no outbound internet.
 - **rTorrent/ruTorrent is not supported.** Its XML-RPC interface is different enough to
   need its own client; the `DownloadClient` interface has room for it.
 - **Ombi's join is weaker than the Seerr family's** — see Supported services above.
-- **The Docker image has not been built in this environment** (no Docker daemon
-  available), so the `Dockerfile` and `docker-entrypoint.sh` are unverified by execution.
-  Everything else — migrations, the poll cycle, all 147 tests, and every page under
-  gunicorn — was run.
+- **No live upstream instance was available during development**, so all API behaviour
+  comes from upstream specs and source rather than a running server. The `linux/amd64`
+  image itself *was* built and run: it starts as `uid=99 gid=100`, migrates, persists
+  `/config` across restarts, serves every page, reaches `healthy`, and passes all 149
+  tests inside the image.
 - **No live upstream instance was available** during development. All API behaviour was
   verified against upstream OpenAPI schemas and source code rather than a running server;
   see the `[UNVERIFIED-LIVE]` markers in `docs/api-notes.md` for the specific items worth

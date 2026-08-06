@@ -169,6 +169,24 @@ def health(request):
     )
 
 
+def healthz(request):
+    """Container liveness probe. Deliberately tiny.
+
+    Not the /health/ page: that renders every configured service, so its cost grows with
+    the size of the setup and it was timing out a 5s probe on slower hosts. This does one
+    trivial query to prove the DB is reachable, renders no template, and returns bytes.
+    """
+    from django.db import connection
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return HttpResponse(f"db error: {exc}", status=503, content_type="text/plain")
+    return HttpResponse("ok", content_type="text/plain")
+
+
 @require_POST
 def probe_service(request, pk: int):
     """Test one service and re-render its health row."""

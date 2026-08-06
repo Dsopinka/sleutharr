@@ -26,14 +26,23 @@ RUN groupadd -g 1000 sleutharr \
 VOLUME ["/config"]
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8080/health/ || exit 1
+# start-period is generous on purpose: first boot runs migrations, and an Unraid array
+# on spinning disks under load is a lot slower than a developer laptop. Failures inside
+# the start period do not count against retries, so erring long costs nothing.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -fsS http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker-entrypoint.sh"]
+# One worker, deliberately: the APScheduler poller lives in-process, and a second worker
+# would mean a second scheduler polling everything twice.
+# --no-control-socket because gunicorn otherwise tries to create one under $HOME (/app,
+# owned by root) and logs a permission error on every start that it never recovers from
+# and never needed.
 CMD ["gunicorn", "sleutharr.wsgi:application", \
      "--bind", "0.0.0.0:8080", \
      "--workers", "1", \
      "--threads", "8", \
      "--timeout", "120", \
+     "--no-control-socket", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

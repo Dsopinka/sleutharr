@@ -1,14 +1,16 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Sleutharr</Name>
-  <Repository>sleutharr/sleutharr:latest</Repository>
-  <Registry>https://hub.docker.com/r/sleutharr/sleutharr</Registry>
+  <!-- Local image tag. Sleutharr is not published to a registry, so load or build the
+       image on the server first (see README, Install on Unraid) and leave this as-is. -->
+  <Repository>sleutharr:latest</Repository>
+  <Registry/>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/yourname/sleutharr/issues</Support>
-  <Project>https://github.com/yourname/sleutharr</Project>
+  <Support/>
+  <Project/>
   <Overview>
     Sleutharr answers one question: "I requested this - where did it die?"
 
@@ -29,7 +31,7 @@
   <Category>MediaApp:Video Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/yourname/sleutharr/main/unraid/icon.png</Icon>
+  <Icon/>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
