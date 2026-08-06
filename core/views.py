@@ -332,6 +332,88 @@ def tunables_save(request):
     return redirect("settings")
 
 
+# --------------------------------------------------------------------------- discovery
+
+
+@require_POST
+def identify_service(request):
+    """Probe a pasted URL and report what is running there."""
+    from core.discovery import identify
+
+    result = identify(
+        request.POST.get("base_url", ""),
+        api_key=request.POST.get("api_key", ""),
+    )
+    return JsonResponse(result)
+
+
+@require_POST
+def discover(request):
+    """Ask the configured services what else exists, and offer to add it."""
+    from core.discovery import discover_all
+
+    outcome = discover_all()
+    return render(
+        request,
+        "core/_discovery.html",
+        {
+            "candidates": outcome.candidates,
+            "errors": outcome.errors,
+            "root_folders": outcome.root_folders,
+            "ran": True,
+        },
+    )
+
+
+@require_POST
+def discover_apply(request):
+    """Add the candidates the user ticked.
+
+    Discovery is re-run rather than carried in the session. It costs a couple of seconds
+    and avoids parking API keys in session storage or in hidden form fields; it also
+    means what gets saved is what is true now, not what was true when the page rendered.
+    """
+    from core.discovery import apply_candidate, discover_all
+
+    chosen = set(request.POST.getlist("add"))
+    if not chosen:
+        return render(
+            request,
+            "core/_discovery.html",
+            {"applied": "Nothing was selected.", "ran": True, "candidates": [], "errors": []},
+        )
+
+    outcome = discover_all()
+    added, updated, failed = 0, 0, []
+
+    for candidate in outcome.candidates:
+        if candidate.key not in chosen:
+            continue
+        try:
+            apply_candidate(candidate)
+        except Exception as exc:  # noqa: BLE001 - surfaced, never a 500
+            logger.warning("Could not add %s: %s", candidate.name, exc)
+            failed.append(f"{candidate.name}: {exc}")
+            continue
+        if candidate.existing_id:
+            updated += 1
+        else:
+            added += 1
+
+    parts = []
+    if added:
+        parts.append(f"Added {added} service{'s' if added != 1 else ''}")
+    if updated:
+        parts.append(f"corrected routing on {updated}")
+    summary = ", ".join(parts) + "." if parts else "Nothing changed."
+
+    return render(
+        request,
+        "core/_discovery.html",
+        {"applied": summary, "errors": failed, "ran": True, "candidates": []},
+    )
+
+
 # ----------------------------------------------------------------------------- actions
 
 

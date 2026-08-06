@@ -1,3 +1,4 @@
+{% load sleutharr %}
 {% if requests %}
 <table class="requests">
   <thead>
@@ -22,14 +23,17 @@
       </td>
       <td>
         {% if r.diagnosis %}
-          <span class="badge badge-{{ r.diagnosis.severity }}">{{ r.diagnosis.code }}</span>
+          <span class="verdict-title sev-{{ r.diagnosis.severity }}">
+            {{ r.diagnosis.code|diagnosis_title }}
+          </span>
+          <code class="verdict-code">{{ r.diagnosis.code }}</code>
           <div class="clamp">{{ r.diagnosis.message }}</div>
           {% if r.diagnosis.next_step %}
             <div class="clamp step">&rarr; {{ r.diagnosis.next_step }}</div>
           {% endif %}
         {% else %}
-          <span class="badge badge-none">undiagnosed</span>
-          <div class="clamp">Waiting for the next poll.</div>
+          <span class="verdict-title sev-none">Still checking</span>
+          <div class="clamp">Sleutharr has not worked this one out yet.</div>
         {% endif %}
       </td>
       <td class="nowrap">

@@ -1,10 +1,13 @@
-"""Rule 5: imported by the *arr, but not visible in Plex.
+"""Rule 5: imported by the *arr, but not visible in the media server.
 
 Two very different causes with identical symptoms, separated here:
 
-* Plex genuinely has not scanned yet -- wait, or trigger a scan.
-* Plex has the item, but our path mapping does not resolve to it -- the mapping is wrong,
-  and no amount of scanning will fix it.
+* the server genuinely has not scanned yet -- wait, or trigger a scan.
+* the server has the item, but our path mapping does not resolve to it -- the mapping is
+  wrong, and no amount of scanning will fix it.
+
+If no media server is configured at all, this rule stays silent: nothing looked, so
+"it is not there" would be an assertion with no evidence behind it.
 
 The distinguishing evidence is the ratingKey join succeeding while the path join fails.
 """
@@ -30,8 +33,16 @@ class NotInMediaServer(Rule):
         if imported is None and not request.arr_has_file:
             return None
 
-        # A path mismatch is recorded as MEDIA_SERVER_AVAILABLE with a mismatch dedupe key: Plex
-        # has the item, our mapping just does not reach it.
+        # With no media server configured, nothing ever looked -- so "it is not there" is
+        # not a finding, it is an absence of evidence. Reporting it anyway sends the user
+        # to investigate a library that Sleutharr was never told about.
+        if not ctx.media_server_configured:
+            return None
+
+        server = ctx.media_server_name
+
+        # A path mismatch is recorded as MEDIA_SERVER_AVAILABLE with a mismatch dedupe key: the
+        # server has the item, our mapping just does not reach it.
         #
         # This is checked *before* the media_server_found short-circuit on purpose. The ingester
         # sets media_server_found=True whenever either join succeeds, and in the mismatch case
@@ -45,23 +56,23 @@ class NotInMediaServer(Rule):
         if mismatches:
             latest = mismatches[-1]
             raw = latest.raw if isinstance(latest.raw, dict) else {}
-            plex_paths = raw.get("plexPaths") or []
+            server_paths = raw.get("serverPaths") or raw.get("plexPaths") or []
             arr_paths = raw.get("arrPaths") or []
             hint = ""
-            if plex_paths and arr_paths:
+            if server_paths and arr_paths:
                 hint = (
                     f"\n\nThe library file is at {arr_paths[0]} according to the *arr, "
-                    f"and at {plex_paths[0]} according to Plex."
+                    f"and at {server_paths[0]} according to {server}."
                 )
             return self.verdict(
-                "The file is in Plex, but no configured path mapping translates the "
-                "*arr's path to the path Plex reports. Sleutharr can see the item only "
+                f"The file is in {server}, but no configured path mapping translates "
+                f"the *arr's path to the path {server} reports. Sleutharr can see the item only "
                 "because the request manager stored its rating key — anything relying "
                 "on path matching (including your own scripts) will be wrong too."
                 + hint,
                 next_step=(
                     "Add the path mapping shown in the timeline entry on the Settings "
-                    "page. This does not affect Plex itself; it corrects how Sleutharr "
+                    f"page. This does not affect {server} itself; it corrects how Sleutharr "
                     "matches files."
                 ),
                 # The fix is in Sleutharr's own settings, not in an upstream app.
@@ -80,16 +91,16 @@ class NotInMediaServer(Rule):
         if imported is not None:
             since_import = ctx.now - imported.occurred_at
             if since_import < timedelta(minutes=grace_minutes):
-                # Inside the grace period this is normal: Plex scans on its own schedule.
+                # Inside the grace period this is normal: servers scan on their own schedule.
                 return None
             hours = since_import.total_seconds() / 3600
             message = (
                 f"The *arr imported this {hours:.1f}h ago, but it still does not appear "
-                f"in Plex."
+                f"in {server}."
             )
         else:
             message = (
-                "The library reports a file on disk, but it does not appear in Plex."
+                f"The library reports a file on disk, but it does not appear in {server}."
             )
 
         detail_hint = ""
@@ -97,7 +108,7 @@ class NotInMediaServer(Rule):
             raw = missing[-1].raw if isinstance(missing[-1].raw, dict) else {}
             if raw.get("basenameCandidate"):
                 detail_hint = (
-                    " A file with the same name does exist in Plex under a different "
+                    f" A file with the same name does exist in {server} under a different "
                     "directory, which points at a path-mapping problem — see the "
                     "timeline entry for the exact prefixes."
                 )
@@ -105,9 +116,9 @@ class NotInMediaServer(Rule):
         return self.verdict(
             message + detail_hint,
             next_step=(
-                "Trigger a library scan in Plex for the relevant library. If it still "
-                "does not appear, check that the Plex library's folder actually contains "
-                "the imported file, and that Plex has read permission on it. If the file "
+                f"Trigger a library scan in {server}. If it still does not appear, check "
+                f"that the {server} library folder actually contains the imported file, "
+                f"and that {server} has permission to read it. If the file "
                 "is there, add a path mapping on the Settings page."
             ),
             link=ctx.media_server_url(),

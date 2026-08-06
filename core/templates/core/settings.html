@@ -3,13 +3,25 @@
 {% block title %}Settings &middot; Sleutharr{% endblock %}
 
 {% block content %}
-<h1>Settings</h1>
-<p class="subtitle">
-  All service URLs and keys live here, in the database &mdash; not in env vars.
-  Sleutharr only ever reads from these services.
-</p>
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p class="subtitle">
+      Sleutharr only ever reads from these services. It never changes anything in them
+      unless you press a button and confirm.
+    </p>
+  </div>
+  <label class="mode-toggle" title="Show the fields most people never need">
+    <input type="checkbox" id="advanced-toggle"> Advanced
+  </label>
+</div>
 
-<h2>Services</h2>
+<h2>Find your services</h2>
+<div class="panel">
+  {% include "core/_discovery.html" with ran=False %}
+</div>
+
+<h2>Your services</h2>
 
 {% for service in services %}
 <details class="svc">
@@ -42,7 +54,12 @@
   </div>
 </details>
 {% empty %}
-<p class="hint" style="margin-bottom:14px">Nothing configured yet. Add a request manager first &mdash; it is the source of every request.</p>
+<div class="empty" style="margin-bottom:14px">
+  <strong>No services yet.</strong>
+  Add your request manager first &mdash; Seerr, Overseerr, Jellyseerr or Ombi. It is where
+  requests come from, so everything else follows on from it. Then press
+  <em>Find my other services</em> above and Sleutharr will fill in the rest.
+</div>
 {% endfor %}
 
 <details class="svc">
@@ -176,64 +193,123 @@
 
 {{ variants_by_kind|json_script:"variants-by-kind" }}
 <script>
-// Keep the product dropdown consistent with the selected kind, and hide fields that do
-// not apply. Purely a convenience -- the server does not depend on it.
 (function () {
   var byKind = JSON.parse(document.getElementById('variants-by-kind').textContent);
+
+  // --- advanced mode -------------------------------------------------------------
+  // Most people never need service ids, TLS toggles or poll intervals. Hiding them by
+  // default is the difference between a form that looks approachable and one that looks
+  // like it needs a manual.
+  var toggle = document.getElementById('advanced-toggle');
+  function applyMode() {
+    var on = toggle.checked;
+    localStorage.setItem('sleutharr-advanced', on ? '1' : '0');
+    document.body.classList.toggle('show-advanced', on);
+  }
+  toggle.checked = localStorage.getItem('sleutharr-advanced') === '1';
+  applyMode();
+  toggle.addEventListener('change', applyMode);
+
+  // --- per-form behaviour --------------------------------------------------------
+  function show(form, selector, visible) {
+    form.querySelectorAll(selector).forEach(function (el) {
+      el.classList.toggle('hidden-field', !visible);
+    });
+  }
 
   function sync(form) {
     var kindSel = form.querySelector('.js-kind');
     var variantSel = form.querySelector('.js-variant');
     if (!kindSel || !variantSel) return;
-    var kind = kindSel.value;
-    var allowed = byKind[kind] || [];
-    var current = variantSel.getAttribute('data-current') || variantSel.value;
 
+    var allowed = byKind[kindSel.value] || [];
+    var current = variantSel.getAttribute('data-current') || variantSel.value;
     variantSel.innerHTML = '';
-    allowed.forEach(function (opt) {
+    (allowed.length ? allowed : [{value: 'native', label: 'Native'}]).forEach(function (opt) {
       var o = document.createElement('option');
-      o.value = opt.value;
-      o.textContent = opt.label;
+      o.value = opt.value; o.textContent = opt.label;
       if (opt.value === current) o.selected = true;
       variantSel.appendChild(o);
     });
-    if (!allowed.length) {
-      var o = document.createElement('option');
-      o.value = 'native'; o.textContent = 'Native';
-      variantSel.appendChild(o);
-    }
 
-    var variant = variantSel.value;
+    var kind = kindSel.value, variant = variantSel.value;
     var isArr = kind === 'sonarr' || kind === 'radarr';
     var isClient = kind === 'download_client';
-    var usesUserPass = ['qbittorrent', 'transmission', 'nzbget'].indexOf(variant) >= 0;
-    var usesPasswordOnly = variant === 'deluge';
-    var usesApiKey = !isClient || ['sabnzbd'].indexOf(variant) >= 0;
+    var userPass = ['qbittorrent', 'transmission', 'nzbget'].indexOf(variant) >= 0;
+    var passOnly = variant === 'deluge';
 
     show(form, '.js-field-arr', isArr);
     show(form, '.js-field-4k', isArr);
     show(form, '.js-field-client', isClient);
-    show(form, '.js-field-username', isClient && usesUserPass);
-    show(form, '.js-field-password', isClient && (usesUserPass || usesPasswordOnly));
-    show(form, '.js-field-apikey', usesApiKey);
+    show(form, '.js-field-username', isClient && userPass);
+    show(form, '.js-field-password', isClient && (userPass || passOnly));
+    show(form, '.js-field-apikey', !isClient || variant === 'sabnzbd');
 
     var hint = form.querySelector('.js-hint-apikey');
     if (hint) {
-      hint.textContent = kind === 'media_server'
-        ? (variant === 'plex' ? 'Plex: X-Plex-Token.' : 'Jellyfin/Emby: an API key from Dashboard → API Keys.')
-        : (variant === 'ombi' ? 'Ombi: the API key from Settings → Configuration.' : '');
+      hint.textContent = ({
+        plex: 'Plex: your X-Plex-Token.',
+        jellyfin: 'Jellyfin: Dashboard → API Keys → add one.',
+        emby: 'Emby: Settings → API Keys → add one.',
+        ombi: 'Ombi: Settings → Configuration → General.',
+        sabnzbd: 'SABnzbd: Config → General → API Key.',
+        seerr: 'Seerr: Settings → General → API Key.',
+        overseerr: 'Overseerr: Settings → General → API Key.',
+        jellyseerr: 'Jellyseerr: Settings → General → API Key.'
+      })[variant] || (isArr ? 'Settings → General → API Key, in Sonarr or Radarr.' : '');
     }
   }
 
-  function show(form, selector, visible) {
-    form.querySelectorAll(selector).forEach(function (el) {
-      el.style.display = visible ? '' : 'none';
+  // --- address detection ---------------------------------------------------------
+  // Rather than making people choose from two dropdowns, ask the address what it is.
+  function wireDetect(form) {
+    var button = form.querySelector('.js-detect');
+    if (!button) return;
+    button.addEventListener('click', function () {
+      var out = form.querySelector('.js-detect-result');
+      var url = form.querySelector('.js-url').value.trim();
+      if (!url) { out.textContent = 'Enter an address first.'; return; }
+
+      out.className = 'js-detect-result hint';
+      out.textContent = 'Checking…';
+      button.disabled = true;
+
+      var body = new URLSearchParams();
+      body.append('base_url', url);
+      body.append('api_key', form.querySelector('.js-key').value);
+      body.append('csrfmiddlewaretoken', form.querySelector('[name=csrfmiddlewaretoken]').value);
+
+      fetch('{% url "identify_service" %}', {method: 'POST', body: body})
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          button.disabled = false;
+          if (!d.ok) {
+            out.className = 'js-detect-result detect-bad';
+            out.textContent = d.detail;
+            return;
+          }
+          form.querySelector('.js-kind').value = d.kind;
+          form.querySelector('.js-variant').setAttribute('data-current', d.variant);
+          sync(form);
+          form.querySelector('.js-variant').value = d.variant;
+          sync(form);
+          var name = form.querySelector('[name=name]');
+          if (!name.value) name.value = d.name;
+          out.className = 'js-detect-result detect-ok';
+          out.textContent = '✓ ' + d.detail;
+        })
+        .catch(function () {
+          button.disabled = false;
+          out.className = 'js-detect-result detect-bad';
+          out.textContent = 'Could not check that address.';
+        });
     });
   }
 
   document.querySelectorAll('form').forEach(function (form) {
     if (!form.querySelector('.js-kind')) return;
     sync(form);
+    wireDetect(form);
     form.querySelector('.js-kind').addEventListener('change', function () {
       form.querySelector('.js-variant').removeAttribute('data-current');
       sync(form);

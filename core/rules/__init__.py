@@ -31,3 +31,34 @@ RULES: list[Rule] = [
 ]
 
 __all__ = ["RULES", "Rule", "RuleContext", "Verdict"]
+
+
+#: Plain-English label for each diagnosis code.
+#:
+#: The codes are stable identifiers meant for searching and scripting; they are not
+#: something a person should have to decode at a glance. The UI leads with these and
+#: keeps the code as secondary text.
+DIAGNOSIS_TITLES: dict[str, str] = {
+    "NEVER_ADDED": "Never reached your library",
+    "NO_ARR_INSTANCE": "Not linked to Sonarr or Radarr",
+    "DECLINED": "Someone declined it",
+    "UNMONITORED": "Not being watched for",
+    "BLOCKLIST_LOOP": "Keeps downloading the same broken file",
+    "DOWNLOADED_NOT_IMPORTED": "Downloaded, but could not be filed away",
+    "DOWNLOAD_CLIENT_ERROR": "The download client hit an error",
+    "GRABBED_BUT_STALLED": "Download is stuck",
+    "PATH_MISMATCH": "Folder paths do not line up",
+    "NOT_IN_MEDIA_SERVER": "Not showing up in your media server",
+    "WRONG_QUALITY": "Lower quality than you asked for",
+    "NOT_RELEASED_YET": "Not out yet",
+    "NEVER_SEARCHED": "Never actually searched for",
+    "NO_RELEASE_FOUND": "Nothing good enough found yet",
+    "FULFILLED": "Done",
+}
+
+
+def title_for(code: str) -> str:
+    """Human label for a diagnosis code, falling back to a readable form of the code."""
+    if code in DIAGNOSIS_TITLES:
+        return DIAGNOSIS_TITLES[code]
+    return code.replace("_", " ").capitalize()

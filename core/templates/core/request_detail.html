@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load sleutharr %}
 
 {% block title %}{{ tracked.display_title }} &middot; Sleutharr{% endblock %}
 
@@ -12,12 +13,15 @@
 
 {% if diagnosis %}
 <div class="panel panel-{{ diagnosis.severity }}">
-  <span class="badge badge-{{ diagnosis.severity }}">{{ diagnosis.code }}</span>
+  <div class="verdict-head">
+    <span class="verdict-title-lg sev-{{ diagnosis.severity }}">{{ diagnosis.code|diagnosis_title }}</span>
+    <code class="verdict-code">{{ diagnosis.code }}</code>
+  </div>
   {# .verdict is white-space:pre-line so quoted upstream errors keep their own line. #}
   <p class="verdict">{{ diagnosis.message }}</p>
   {% if diagnosis.next_step %}
   <div class="next-step">
-    <strong>Next step</strong>
+    <strong>What to do</strong>
     {{ diagnosis.next_step }}
     {% if diagnosis.link_url %}
       <p style="margin:8px 0 0">
@@ -34,9 +38,12 @@
 </div>
 {% else %}
 <div class="panel">
-  <span class="badge badge-none">undiagnosed</span>
+  <div class="verdict-head">
+    <span class="verdict-title-lg sev-none">Still checking</span>
+  </div>
   <p style="margin:9px 0 0;color:var(--text-dim)">
-    No rule has matched yet &mdash; either the pollers have not caught up, or nothing is wrong.
+    Nothing looks wrong so far. Either Sleutharr has not finished looking, or this one is
+    simply still on its way.
   </p>
 </div>
 {% endif %}

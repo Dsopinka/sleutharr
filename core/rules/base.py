@@ -122,6 +122,30 @@ class RuleContext:
         return f"{service.url}/activity/queue", f"{service.name} queue"
 
     @property
+    def media_server_configured(self) -> bool:
+        """Whether any media server exists to have looked in.
+
+        Rules must not report absence from a library nobody configured.
+        """
+        from core.models import ServiceInstance, ServiceKind
+
+        return ServiceInstance.objects.filter(
+            kind=ServiceKind.MEDIA_SERVER, enabled=True
+        ).exists()
+
+    @property
+    def media_server_name(self) -> str:
+        """Display name of the configured media server, for messages."""
+        from core.models import ServiceInstance, ServiceKind
+
+        service = ServiceInstance.objects.filter(
+            kind=ServiceKind.MEDIA_SERVER, enabled=True
+        ).first()
+        if service is None:
+            return "your media server"
+        return service.get_variant_display() if service.variant else service.name
+
+    @property
     def request_manager_links_entities(self) -> bool:
         """Whether the request manager records which *arr record a request became.
 

@@ -327,6 +327,18 @@ class GrabbedButStalledTests(RuleTestCase):
 
 
 class NotInMediaServerTests(RuleTestCase):
+    def setUp(self):
+        super().setUp()
+        # This whole rule is about what a media server does or does not have, so there
+        # has to be one. Without it the rule correctly stays silent -- see
+        # NoMediaServerConfiguredTests.
+        self.plex = make_service(
+            ServiceKind.MEDIA_SERVER,
+            name="Plex",
+            variant=ServiceVariant.PLEX,
+            base_url="http://plex:32400",
+        )
+
     def test_imported_but_absent_after_grace_fires(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
         request.media_server_found = False
@@ -550,3 +562,51 @@ class EnginePersistenceTests(RuleTestCase):
         )
         verdict = self.verdict_for(request)
         self.assertEqual(verdict.code, "UNMONITORED")
+
+
+class NoMediaServerConfiguredTests(RuleTestCase):
+    """Found on a live instance: it claimed a file was missing from Plex when the user
+    had never configured any media server. Absence of evidence is not evidence."""
+
+    def _imported_request(self):
+        request = make_request(
+            service=self.seerr, arr_service=self.radarr, has_file=True
+        )
+        add_event(request, EventType.IMPORTED, hours_ago=600, raw={})
+        return request
+
+    def test_silent_when_no_media_server_is_configured(self):
+        request = self._imported_request()
+        verdict = self.verdict_for(request)
+        self.assertNotEqual(getattr(verdict, "code", None), "NOT_IN_MEDIA_SERVER")
+
+    def test_fires_once_a_media_server_exists(self):
+        request = self._imported_request()
+        make_service(
+            ServiceKind.MEDIA_SERVER, name="Plex", variant=ServiceVariant.PLEX
+        )
+        request.media_server_found = False
+        request.save()
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "NOT_IN_MEDIA_SERVER")
+
+    def test_message_names_the_configured_product_not_plex(self):
+        request = self._imported_request()
+        make_service(
+            ServiceKind.MEDIA_SERVER, name="Media", variant=ServiceVariant.JELLYFIN
+        )
+        request.media_server_found = False
+        request.save()
+        verdict = self.verdict_for(request)
+        self.assertIn("Jellyfin", verdict.message)
+        self.assertNotIn("Plex", verdict.message)
+
+    def test_disabled_media_server_does_not_count(self):
+        request = self._imported_request()
+        service = make_service(
+            ServiceKind.MEDIA_SERVER, name="Plex", variant=ServiceVariant.PLEX
+        )
+        service.enabled = False
+        service.save()
+        verdict = self.verdict_for(request)
+        self.assertNotEqual(getattr(verdict, "code", None), "NOT_IN_MEDIA_SERVER")

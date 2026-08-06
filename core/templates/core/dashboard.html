@@ -1,11 +1,12 @@
 {% extends "core/base.html" %}
+{% load sleutharr %}
 
 {% block content %}
 <h1>Unfulfilled requests</h1>
 <p class="subtitle">
-  {{ total_unfulfilled }} request{{ total_unfulfilled|pluralize }} requested but not yet
-  available{% if undiagnosed %} &middot; {{ undiagnosed }} not diagnosed yet{% endif %}.
-  Oldest first.
+  {{ total_unfulfilled }} thing{{ total_unfulfilled|pluralize }} you asked for that
+  {{ total_unfulfilled|pluralize:"has,have" }} not arrived yet, oldest first.
+  {% if undiagnosed %}{{ undiagnosed }} still being worked out.{% endif %}
 </p>
 
 {% if no_services %}
@@ -21,7 +22,7 @@
     {% for row in diagnosis_counts %}
       <a class="chip {% if active_code == row.code %}active{% endif %}"
          href="{% url 'dashboard' %}?code={{ row.code }}">
-        <span class="dot dot-{{ row.severity }}"></span>{{ row.code }}
+        <span class="dot dot-{{ row.severity }}"></span>{{ row.code|diagnosis_title }}
         <span class="n">{{ row.n }}</span>
       </a>
     {% endfor %}

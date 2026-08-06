@@ -383,3 +383,97 @@ table.mini td { padding: 5px 8px; }
 }
 /* The quoted upstream error, set apart from our own prose. */
 .verdict::first-line { font-weight: inherit; }
+
+/* ------------------------------------------------------- simple / advanced mode */
+
+/* Advanced fields are hidden unless the user opts in. Service ids, TLS toggles and
+   poll intervals are the difference between a form that looks approachable and one
+   that looks like it needs a manual.
+
+   The .checkrow selectors are repeated at matching specificity on purpose: a bare
+   `.adv { display:none }` loses to `.checkrow label { display:flex }` and the advanced
+   checkboxes leak into simple mode. */
+.adv { display: none; }
+.checkrow label.adv { display: none; }
+body.show-advanced .adv { display: block; }
+body.show-advanced .checkrow label.adv { display: flex; }
+
+/* Set by the form script when a field does not apply to the chosen service. */
+.hidden-field { display: none !important; }
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 12px;
+  cursor: pointer;
+  margin: 0;
+  white-space: nowrap;
+}
+.mode-toggle:hover { border-color: var(--accent-dim); color: var(--text); }
+.mode-toggle input { width: auto; margin: 0; }
+
+/* ------------------------------------------------------------------- detection */
+
+.detect-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 14px;
+  flex-wrap: wrap;
+}
+.detect-ok { color: var(--ok); font-size: 12px; }
+.detect-bad { color: var(--warning); font-size: 12px; }
+
+.pair { display: flex; gap: 8px; }
+.pair select { flex: 1; min-width: 0; }
+
+table.discovery td { vertical-align: middle; border-bottom: 1px solid var(--border-soft); }
+table.discovery input[type=checkbox] { width: auto; }
+
+/* htmx sets this while a request is in flight. */
+.htmx-indicator { display: none; margin-left: 8px; }
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator { display: inline; }
+
+/* ------------------------------------------------- plain-language verdicts */
+
+/* The code is a stable identifier for searching and scripting; the sentence is what a
+   person actually reads. Lead with the sentence. */
+.verdict-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  display: inline-block;
+}
+.verdict-title-lg { font-weight: 620; font-size: 16px; }
+.verdict-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+
+.sev-error   { color: var(--error); }
+.sev-warning { color: var(--warning); }
+.sev-info    { color: var(--info); }
+.sev-ok      { color: var(--ok); }
+.sev-none    { color: var(--text-faint); }
+
+.verdict-code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}

@@ -1,89 +1,95 @@
-{# Shared by the add and edit forms; `service` is None when adding. Variants filter by kind. #}
+{# Shared by the add and edit forms; `service` is None when adding. #}
+<div class="grid grid-2">
+  <div class="field">
+    <label>Address</label>
+    <input type="text" name="base_url" class="js-url" value="{{ service.base_url|default:'' }}"
+           required placeholder="192.168.1.10:7878">
+    <div class="hint">
+      Where the service is, e.g. <code>192.168.1.10:7878</code>. Use your server's IP,
+      not <code>localhost</code> &mdash; inside Docker that means Sleutharr itself.
+    </div>
+  </div>
+  <div class="field js-field-apikey">
+    <label>API key {% if service and service.api_key %}<span class="hint" style="display:inline">(saved &mdash; leave blank to keep it)</span>{% endif %}</label>
+    <input type="password" name="api_key" class="js-key" autocomplete="new-password"
+           placeholder="{% if service and service.api_key %}••••••••••••{% else %}paste the key{% endif %}">
+    <div class="hint js-hint-apikey">Found in the service's own settings page.</div>
+  </div>
+</div>
+
+<div class="detect-row">
+  <button class="btn btn-sm js-detect" type="button">Check this address</button>
+  <span class="js-detect-result hint"></span>
+</div>
+
 <div class="grid grid-2">
   <div class="field">
     <label>Name</label>
     <input type="text" name="name" value="{{ service.name|default:'' }}" required
-           placeholder="Radarr 4K">
+           placeholder="Radarr">
+    <div class="hint">Just a label, so you can tell instances apart.</div>
   </div>
   <div class="field">
-    <label>Kind</label>
-    <select name="kind" class="js-kind">
-      {% for value, label in kinds %}
-        <option value="{{ value }}" {% if service and service.kind == value %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="field">
-    <label>Product</label>
-    <select name="variant" class="js-variant"
-            data-current="{{ service.variant|default:'' }}">
-      {% for value, label in variants %}
-        <option value="{{ value }}" {% if service and service.variant == value %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="field">
-    <label>Base URL</label>
-    <input type="text" name="base_url" value="{{ service.base_url|default:'' }}" required
-           placeholder="http://192.168.1.10:7878">
-    <div class="hint">No trailing slash, no /api suffix. For Ombi behind a sub-path, include it.</div>
+    <label>What is it?</label>
+    <div class="pair">
+      <select name="kind" class="js-kind">
+        {% for value, label in kinds %}
+          <option value="{{ value }}" {% if service and service.kind == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select name="variant" class="js-variant" data-current="{{ service.variant|default:'' }}">
+        {% for value, label in variants %}
+          <option value="{{ value }}" {% if service and service.variant == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="hint">Filled in for you when you check the address.</div>
   </div>
 </div>
 
 <div class="grid grid-2">
-  <div class="field js-field-apikey">
-    <label>API key / token {% if service and service.api_key %}<span class="hint" style="display:inline">(stored &mdash; leave blank to keep)</span>{% endif %}</label>
-    <input type="password" name="api_key" autocomplete="new-password"
-           placeholder="{% if service and service.api_key %}••••••••••••{% else %}API key{% endif %}">
-    <div class="hint js-hint-apikey"></div>
-  </div>
-  <div class="field">
-    <label>Poll interval (seconds)</label>
-    <input type="number" name="poll_interval" min="10" value="{{ service.poll_interval|default:60 }}">
-  </div>
   <div class="field js-field-username">
     <label>Username</label>
     <input type="text" name="username" value="{{ service.username|default:'' }}" autocomplete="off">
-    <div class="hint">qBittorrent, Transmission and NZBGet only.</div>
   </div>
   <div class="field js-field-password">
     <label>Password</label>
     <input type="password" name="password" autocomplete="new-password"
            placeholder="{% if service and service.password %}••••••••••••{% endif %}">
-    <div class="hint">Deluge uses the password alone, with no username.</div>
-  </div>
-</div>
-
-<div class="grid grid-2 js-field-arr">
-  <div class="field">
-    <label>Request manager service id</label>
-    <input type="number" name="remote_service_id"
-           value="{{ service.remote_service_id|default_if_none:'' }}">
-    <div class="hint">
-      The <code>serviceId</code> the request manager uses for this instance &mdash; its
-      position in the request manager's Sonarr/Radarr settings list, starting at 0. This
-      is how a request is routed to the right instance when several are configured.
-      Leave blank to fall back to matching on TMDB/TVDB id. Ombi does not provide one.
-    </div>
-  </div>
-</div>
-
-<div class="grid grid-2 js-field-client">
-  <div class="field">
-    <label>Name inside Sonarr/Radarr</label>
-    <input type="text" name="arr_client_name" value="{{ service.arr_client_name|default:'' }}"
-           placeholder="leave blank if the same as the name above">
-    <div class="hint">
-      Required when you run more than one usenet client. SABnzbd and NZBGet download ids
-      are only unique within a single instance, so Sleutharr matches queue rows by the
-      client name the *arr reports. Torrent clients use globally-unique infohashes and do
-      not need this.
-    </div>
   </div>
 </div>
 
 <div class="checkrow">
   <label><input type="checkbox" name="enabled" {% if not service or service.enabled %}checked{% endif %}> Enabled</label>
-  <label><input type="checkbox" name="verify_tls" {% if not service or service.verify_tls %}checked{% endif %}> Verify TLS</label>
-  <label class="js-field-4k"><input type="checkbox" name="is_4k" {% if service and service.is_4k %}checked{% endif %}> Handles the 4K lane</label>
+  <label class="adv"><input type="checkbox" name="verify_tls" {% if not service or service.verify_tls %}checked{% endif %}> Verify TLS certificate</label>
+  <label class="js-field-4k adv"><input type="checkbox" name="is_4k" {% if service and service.is_4k %}checked{% endif %}> This one handles 4K</label>
+</div>
+
+{# --- advanced ------------------------------------------------------------------- #}
+<div class="adv">
+  <div class="grid grid-2">
+    <div class="field js-field-arr">
+      <label>Request manager service id</label>
+      <input type="number" name="remote_service_id"
+             value="{{ service.remote_service_id|default_if_none:'' }}">
+      <div class="hint">
+        Which of the request manager's Sonarr/Radarr entries this is, counting from 0.
+        Only matters if you run more than one. <strong>Use “Find my other services”
+        instead of guessing</strong> &mdash; it reads the real value.
+      </div>
+    </div>
+    <div class="field js-field-client">
+      <label>Name inside Sonarr/Radarr</label>
+      <input type="text" name="arr_client_name" value="{{ service.arr_client_name|default:'' }}"
+             placeholder="leave blank if it matches the name above">
+      <div class="hint">
+        Only needed if you run more than one SABnzbd or NZBGet. Their download ids are
+        only unique within one instance, so Sleutharr tells them apart by this name.
+      </div>
+    </div>
+    <div class="field">
+      <label>Check every (seconds)</label>
+      <input type="number" name="poll_interval" min="10" value="{{ service.poll_interval|default:60 }}">
+    </div>
+  </div>
 </div>

@@ -1,0 +1,87 @@
+{# Results of asking the configured services what else exists. #}
+<div id="discovery">
+  {% if applied %}
+    <div class="notice notice-ok">{{ applied }}</div>
+    <p class="hint">
+      <a href="{% url 'settings' %}">Reload the page</a> to see them, then use
+      <strong>Test</strong> on the Health page to check each one.
+    </p>
+
+  {% elif ran %}
+    {% if candidates %}
+      <form method="post" action="{% url 'discover_apply' %}"
+            hx-post="{% url 'discover_apply' %}" hx-target="#discovery" hx-swap="outerHTML">
+        {% csrf_token %}
+
+        <p class="hint" style="margin-top:0">
+          Found {{ candidates|length }}. Ticked items will be added with their settings
+          filled in — including the two that are easy to get wrong by hand: which
+          instance the request manager routes to, and what your download clients are
+          called inside Sonarr/Radarr.
+        </p>
+
+        <table class="mini discovery">
+          <tbody>
+            {% for c in candidates %}
+            <tr>
+              <td style="width:26px">
+                <input type="checkbox" name="add" value="{{ c.key }}"
+                       {% if c.is_new %}checked{% endif %}>
+              </td>
+              <td>
+                <div class="action-title">{{ c.name }}</div>
+                <div class="hint">
+                  {{ c.kind_display }} &middot; {{ c.base_url }}
+                </div>
+              </td>
+              <td class="nowrap">
+                {% if c.is_new %}
+                  <span class="badge badge-ok">new</span>
+                {% else %}
+                  <span class="badge badge-none">already added</span>
+                {% endif %}
+              </td>
+              <td class="hint">
+                {% if c.remote_service_id is not None %}
+                  routes as id {{ c.remote_service_id }}{% if c.is_4k %}, 4K lane{% endif %}<br>
+                {% endif %}
+                {% if c.arr_client_name %}known to the *arr as “{{ c.arr_client_name }}”<br>{% endif %}
+                {% if c.api_key %}key found<br>{% endif %}
+                {% if c.note %}{{ c.note }}<br>{% endif %}
+                <span style="color:var(--text-faint)">via {{ c.found_via }}</span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <button class="btn btn-primary" type="submit" style="margin-top:10px">
+          Add selected
+        </button>
+      </form>
+    {% else %}
+      <div class="notice">Nothing new found — everything reachable is already added.</div>
+    {% endif %}
+
+    {% if errors %}
+      <details class="what-happens" style="margin-top:10px">
+        <summary>{{ errors|length }} thing(s) could not be checked</summary>
+        <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+      </details>
+    {% endif %}
+
+  {% else %}
+    <p class="hint" style="margin-top:0">
+      Sleutharr can read your setup from the services you have already added. Your
+      request manager knows every Sonarr and Radarr you use; those in turn know every
+      download client.
+    </p>
+    <button class="btn btn-primary" type="button"
+            hx-post="{% url 'discover' %}" hx-target="#discovery" hx-swap="outerHTML"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-indicator="#discovery-spin">
+      Find my other services
+    </button>
+    <span id="discovery-spin" class="htmx-indicator hint">Checking…</span>
+  {% endif %}
+</div>
