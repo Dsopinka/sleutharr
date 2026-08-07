@@ -13,8 +13,10 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from core.actions import (
     ActionError,
+    can_retry,
     describe_remove,
     remove_from_queue,
+    retry_request,
     search_enabled,
     trigger_search,
 )
@@ -160,6 +162,7 @@ def request_detail(request, pk: int):
             "actions": tracked.actions.all()[:10],
             "diagnosis_code": diagnosis.code if diagnosis else "",
             "explainable": EXPLAINABLE_CODES,
+            "can_retry": can_retry(tracked),
         },
     )
 
@@ -670,6 +673,17 @@ def action_remove(request, pk: int):
 
 
 @require_POST
+def action_retry(request, pk: int):
+    """Ask the request manager to push this request to Sonarr/Radarr again."""
+    tracked = get_object_or_404(TrackedRequest, pk=pk)
+    try:
+        entry = retry_request(tracked)
+    except ActionError as exc:
+        return _action_result(request, tracked, error=str(exc))
+    return _action_result(request, tracked, message=entry.detail)
+
+
+@require_POST
 def action_search(request, pk: int):
     tracked = get_object_or_404(TrackedRequest, pk=pk)
     try:
@@ -699,6 +713,7 @@ def _action_result(request, tracked, *, message: str = "", error: str = ""):
         "actions": tracked.actions.all()[:10],
         "diagnosis_code": diagnosis.code if diagnosis else "",
         "explainable": EXPLAINABLE_CODES,
+        "can_retry": can_retry(tracked),
     }
     if request.headers.get("HX-Request"):
         return render(request, "core/_actions.html", context)

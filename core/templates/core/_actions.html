@@ -12,6 +12,24 @@
     <div class="notice notice-error">{{ action_error }}</div>
   {% endif %}
 
+  {% if diagnosis_code == 'NEVER_ADDED' and can_retry %}
+    <form method="post" action="{% url 'action_retry' tracked.pk %}"
+          hx-post="{% url 'action_retry' tracked.pk %}"
+          hx-target="#actions" hx-swap="outerHTML"
+          hx-confirm="Ask {{ tracked.service.name }} to send this request to Sonarr/Radarr again?&#10;&#10;Nothing is deleted. If it is already in your library this does nothing."
+          class="action-row">
+      {% csrf_token %}
+      <div class="action-target">
+        <div class="action-title">Try sending it again</div>
+        <div class="hint">
+          The hand-off to Sonarr/Radarr failed. This asks
+          {{ tracked.service.name }} to redo it, which is usually all it takes.
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Retry</button>
+    </form>
+  {% endif %}
+
   {% if diagnosis_code == 'PATH_MISMATCH' %}
     <form method="post" action="{% url 'apply_suggested_mapping' tracked.pk %}"
           hx-post="{% url 'apply_suggested_mapping' tracked.pk %}"

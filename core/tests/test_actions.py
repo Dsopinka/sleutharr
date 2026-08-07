@@ -252,3 +252,69 @@ class NoAutomationTests(TestCase):
         source = inspect.getsource(ingest_pkg)
         for name in ("remove_from_queue", "trigger_search", "core.actions"):
             self.assertNotIn(name, source)
+
+
+class RetryRequestTests(ActionTestCase):
+    """NEVER_ADDED is the one diagnosis whose fix lives in the request manager."""
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/retry"):
+            self.retried = getattr(self, "retried", 0) + 1
+            return httpx.Response(200, json={"id": 101})
+        return httpx.Response(404, json={})
+
+    def run_retry(self):
+        from core.clients.requestmanager import SeerrClient
+
+        client = SeerrClient(self.seerr)
+        with mock_client(client, self.handler), mock.patch(
+            "core.clients.requestmanager.request_manager_client", return_value=client
+        ), mock.patch(
+            "core.actions.request_manager_client", return_value=client, create=True
+        ):
+            from core.actions import retry_request
+
+            return retry_request(self.tracked)
+
+    def test_posts_to_the_retry_endpoint(self):
+        entry = self.run_retry()
+        self.assertEqual(self.retried, 1)
+        self.assertEqual(entry.status, ActionStatus.SUCCESS)
+        self.assertEqual(entry.params["requestId"], 101)
+
+    def test_records_it_on_the_timeline(self):
+        self.run_retry()
+        self.assertTrue(
+            self.tracked.events.filter(summary="Retried by Sleutharr").exists()
+        )
+
+    def test_clears_the_stale_not_in_arr_evidence(self):
+        """The verdict was about a state we have just tried to change."""
+        TimelineEvent.objects.create(
+            request=self.tracked,
+            source_kind=ServiceKind.RADARR,
+            event_type=EventType.NOT_IN_ARR,
+            occurred_at=timezone.now(),
+            summary="Not in Radarr",
+            dedupe_key="arr:1:missing",
+        )
+        self.run_retry()
+        self.assertFalse(
+            self.tracked.events.filter(event_type=EventType.NOT_IN_ARR).exists()
+        )
+
+    def test_ombi_is_refused_with_a_reason(self):
+        """Ombi has no retry endpoint, so the button must not promise one."""
+        from core.actions import ActionError, can_retry
+
+        self.seerr.variant = ServiceVariant.OMBI
+        self.seerr.save()
+        self.tracked.refresh_from_db()
+        self.assertFalse(can_retry(self.tracked))
+        with self.assertRaises(ActionError) as caught:
+            self.run_retry()
+        self.assertIn("no retry endpoint", str(caught.exception))
+
+    def test_view_is_post_only(self):
+        response = self.client.get(reverse("action_retry", args=[self.tracked.pk]))
+        self.assertEqual(response.status_code, 405)

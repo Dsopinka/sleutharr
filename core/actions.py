@@ -260,6 +260,102 @@ def remove_from_queue(
     return entry
 
 
+def can_retry(tracked: TrackedRequest) -> bool:
+    """Whether the request manager can re-push this request.
+
+    Only the Seerr family exposes a retry endpoint. Ombi has no equivalent, so offering
+    the button there would be a promise we cannot keep.
+    """
+    from core.models import ServiceVariant
+
+    service = tracked.service
+    return bool(
+        service
+        and service.variant
+        in (
+            ServiceVariant.SEERR,
+            ServiceVariant.OVERSEERR,
+            ServiceVariant.JELLYSEERR,
+        )
+    )
+
+
+def retry_request(tracked: TrackedRequest) -> ActionLog:
+    """Ask the request manager to re-send this request to Sonarr/Radarr.
+
+    This is the actual fix for NEVER_ADDED: the hand-off failed, and the request manager
+    can do it again. It is far safer than the queue actions -- nothing is deleted, and a
+    duplicate push is a no-op if the item is already in the library -- but it is still a
+    write to an upstream service, so it is confirmed like the rest.
+    """
+    from core.clients.requestmanager import request_manager_client
+
+    service = tracked.service
+    if service is None:
+        raise ActionError("This request has no request manager attached.")
+    if not can_retry(tracked):
+        raise ActionError(
+            f"{service.get_variant_display()} has no retry endpoint. Re-request the "
+            f"title in {service.name} instead."
+        )
+    if not service.enabled:
+        raise ActionError(f"{service.name} is disabled.")
+
+    client = request_manager_client(service)
+    try:
+        with client:
+            client.request("POST", f"/request/{tracked.remote_id}/retry")
+        client.record_success()
+    except Exception as exc:  # noqa: BLE001
+        client.record_failure(exc)
+        _log(
+            tracked,
+            "retry_request",
+            status=ActionStatus.FAILED,
+            error=str(exc),
+            params={"requestId": tracked.remote_id},
+            service_name=service.name,
+        )
+        raise ActionError(f"{service.name} rejected the retry: {exc}") from exc
+    finally:
+        client.close()
+
+    detail = (
+        f"Asked {service.name} to send this request to Sonarr/Radarr again. "
+        "It may take a minute to show up."
+    )
+    entry = _log(
+        tracked,
+        "retry_request",
+        status=ActionStatus.SUCCESS,
+        detail=detail,
+        params={"requestId": tracked.remote_id},
+        service_name=service.name,
+    )
+
+    TimelineEvent.objects.update_or_create(
+        request=tracked,
+        dedupe_key=f"action:retry:{timezone.now():%Y%m%d%H%M}",
+        defaults={
+            "service": service,
+            "source_kind": ServiceKind.REQUEST_MANAGER,
+            "event_type": EventType.REQUESTED,
+            "occurred_at": timezone.now(),
+            "summary": "Retried by Sleutharr",
+            "detail": detail,
+            "raw": {"requestId": tracked.remote_id, "performedBy": "sleutharr"},
+        },
+    )
+
+    # The "never added" verdict was about a state we have just tried to change; clearing
+    # the stale evidence lets the next poll speak for itself.
+    TimelineEvent.objects.filter(
+        request=tracked, event_type=EventType.NOT_IN_ARR
+    ).delete()
+
+    return entry
+
+
 def search_enabled() -> bool:
     return bool(AppSetting.get("enable_search_action"))
 
