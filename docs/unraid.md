@@ -16,8 +16,9 @@ after the full test suite passes.
 
 ### Using the template
 
-Copy [`unraid/sleutharr.xml`](../unraid/sleutharr.xml) into the server's private template
-directory, via any SMB share or the file manager:
+Sleutharr is not in Community Applications yet, so the template does not appear on its
+own. Copy [`unraid/sleutharr.xml`](../unraid/sleutharr.xml) into the server's private
+template directory, via any SMB share or the file manager:
 
 ```
 /boot/config/plugins/dockerMan/templates-user/my-sleutharr.xml
@@ -25,6 +26,9 @@ directory, via any SMB share or the file manager:
 
 Then **Docker → Add Container → Template → my-sleutharr**. Fields arrive pre-filled;
 review and click **Apply**.
+
+See [Publishing to Community Applications](ca-submission.md) for what it would take for
+the template to arrive automatically.
 
 ### Or add it by hand
 

@@ -24,12 +24,43 @@
     downloads, which always asks for confirmation and never runs automatically.
 
     All service URLs and API keys are configured in the web UI, not through environment
-    variables. Add your services on the Settings page after first start.
+    variables. Add your services on the Settings page after first start, then press
+    "Find my other services" and Sleutharr will read the rest of your setup for you.
   </Overview>
+  <Description>
+    The *arr stack is very good at each individual job and gives you nothing that spans
+    them. When a request never arrives, the answer is somewhere across five different
+    web UIs, and the symptom rarely matches the cause:
+
+    &#8226; Sonarr says "no results" - because the item is not monitored.
+    &#8226; The download client shows 100% - because the import failed on a hardlink error.
+    &#8226; The *arr says "imported" - because Plex mounts that folder at a different path.
+
+    Sleutharr gives you a single verdict per request, the evidence behind it, and the
+    specific next action - with a link straight to the record in whichever app owns the
+    fix.
+
+    **Setting it up**
+
+    Add your request manager, then press "Find my other services". Sleutharr reads your
+    Sonarr and Radarr instances out of it - including the two settings that are easy to
+    get wrong by hand - and then reads your download clients out of those. For Plex you
+    sign in with your Plex account and pick a server; there is no token to hunt down.
+
+    **What it can fix for you**
+
+    Every action asks first and nothing runs unattended:
+
+    &#8226; Remove a stuck download and blocklist the release, so the *arr finds another.
+    &#8226; Retry a request whose hand-off to Sonarr/Radarr failed.
+    &#8226; Add the folder mapping when your media server sees files at a different path.
+    &#8226; Ask your indexers why nothing is being grabbed, and show the exact reason
+      each release was rejected.
+  </Description>
   <Category>MediaApp:Video Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
-  <TemplateURL/>
-  <Icon/>
+  <TemplateURL>https://raw.githubusercontent.com/Dsopinka/sleutharr/main/unraid/sleutharr.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Dsopinka/sleutharr/main/unraid/icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
