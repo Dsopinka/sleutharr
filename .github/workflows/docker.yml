@@ -6,10 +6,6 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -38,22 +34,51 @@ jobs:
       contents: read
       # Lets the built-in GITHUB_TOKEN push to GHCR; no PAT needed.
       packages: write
+    env:
+      # Empty unless the repository has the Docker Hub secrets set. Referenced through
+      # env rather than inline, so the value is never echoed into a step's log.
+      DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Decide which registries to publish to
+        id: targets
+        run: |
+          # GHCR always; Docker Hub only once its secrets exist, so the workflow keeps
+          # working unchanged before they are added.
+          {
+            echo 'images<<EOF'
+            echo "ghcr.io/${GITHUB_REPOSITORY,,}"
+            if [ -n "$DOCKERHUB_USER" ]; then
+              echo "docker.io/${DOCKERHUB_USER}/sleutharr"
+              echo "publishing to Docker Hub as ${DOCKERHUB_USER}/sleutharr" >&2
+            else
+              echo "DOCKERHUB_USERNAME not set - skipping Docker Hub" >&2
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USER != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.targets.outputs.images }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
@@ -70,7 +95,19 @@ jobs:
           # that ever changes.
           platforms: linux/amd64
           push: true
+          # One build, pushed to every registry in the list above.
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Update the Docker Hub description
+        if: env.DOCKERHUB_USER != ''
+        uses: peter-evans/dockerhub-description@v4
+        continue-on-error: true
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/sleutharr
+          readme-filepath: ./docs/dockerhub.md
+          short-description: "Traces a media request across Seerr, Sonarr/Radarr, your download client and Plex, and tells you where it died."
