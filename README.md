@@ -110,7 +110,10 @@ Then open `http://localhost:8080` and add your services on the Settings page.
 
 ### Unraid
 
-**→ [Full Unraid install guide](docs/unraid.md)**
+**→ [Step-by-step install guide](docs/install-guide.md)** — written to be sent to
+someone else; no template needed, covers the IP/port setup in full.
+
+**→ [Reference install notes](docs/unraid.md)** — template file, updating, troubleshooting.
 
 **Docker → Add Container**, then:
 
