@@ -326,3 +326,175 @@ class PlexPathIndexTests(TestCase):
             [mapping],
         )
         self.assertTrue(result.found)
+
+
+class ModelAttributeGuardTests(TestCase):
+    """Django accepts assignment to any attribute, field or not, and silently drops it.
+
+    That turned a field rename into invisible data loss: `tracked.plex_rating_key = ...`
+    kept working after the field became `media_server_item_id`, so the Plex rating key
+    was never stored and the id-based media-server join quietly had nothing to work with.
+    Nothing failed; the feature just stopped existing.
+    """
+
+    def test_every_attribute_the_upsert_sets_is_a_real_field(self):
+        import inspect
+        import re
+
+        from core.ingest import requests as ingest_requests
+        from core.models import TrackedRequest
+
+        source = inspect.getsource(ingest_requests._upsert)
+        assigned = set(re.findall(r"^\s*tracked\.([a-z_][a-z0-9_]*)\s*=", source, re.M))
+        fields = {f.name for f in TrackedRequest._meta.get_fields()}
+        # Foreign keys can be assigned by object or by _id.
+        fields |= {f"{f.name}_id" for f in TrackedRequest._meta.get_fields()}
+
+        unknown = sorted(assigned - fields)
+        self.assertEqual(
+            unknown,
+            [],
+            f"These are assigned in _upsert but are not model fields, so their values "
+            f"are silently discarded: {unknown}",
+        )
+
+    def test_rating_key_actually_round_trips(self):
+        from core.clients.requestmanager import SeerrClient
+        from core.models import ServiceInstance
+
+        seerr = make_service(
+            ServiceKind.REQUEST_MANAGER,
+            name="Seerr",
+            variant=ServiceVariant.SEERR,
+            base_url="http://seerr:5055",
+        )
+        make_service(ServiceKind.RADARR, name="Radarr", remote_service_id=0)
+        payload = load("seerr_requests.json")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/request"):
+                if int(request.url.params.get("skip", 0)) > 0:
+                    return _json({"pageInfo": {"results": 3}, "results": []})
+                return _json(payload)
+            return _json({"title": "x", "releaseDate": "2024-01-01"})
+
+        client = SeerrClient(seerr)
+        with mock_client(client, handler), mock.patch(
+            "core.ingest.requests.request_manager_client", return_value=client
+        ):
+            sync_service_requests(seerr)
+
+        standard = TrackedRequest.objects.get(remote_id=101)
+        # The fixture carries ratingKey "20481" on the non-4K lane.
+        self.assertEqual(standard.media_server_item_id, "20481")
+
+
+class DeletionReconcileTests(TestCase):
+    """A request deleted in the request manager has to disappear here too.
+
+    The normal sync stops as soon as it recognises records, so it can never notice an
+    absence. Reported from a live instance: a request removed from Seerr -- which also
+    removed it from Radarr -- was still listed days later.
+    """
+
+    def setUp(self):
+        self.seerr = make_service(
+            ServiceKind.REQUEST_MANAGER,
+            name="Seerr",
+            variant=ServiceVariant.SEERR,
+            base_url="http://seerr:5055",
+        )
+        make_service(ServiceKind.RADARR, name="Radarr", remote_service_id=0)
+        self.payload = load("seerr_requests.json")
+
+    def _handler(self, results):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/request"):
+                if int(request.url.params.get("skip", 0)) > 0:
+                    return _json({"pageInfo": {"results": len(results)}, "results": []})
+                return _json({"pageInfo": {"results": len(results)}, "results": results})
+            return _json({"title": "x", "releaseDate": "2024-01-01"})
+
+        return handler
+
+    def _sync(self, results, **kwargs):
+        from core.clients.requestmanager import SeerrClient
+
+        client = SeerrClient(self.seerr)
+        with mock_client(client, self._handler(results)), mock.patch(
+            "core.ingest.requests.request_manager_client", return_value=client
+        ):
+            return sync_service_requests(self.seerr, **kwargs)
+
+    def test_request_removed_upstream_is_deleted_here(self):
+        self._sync(self.payload["results"])
+        self.assertEqual(TrackedRequest.objects.count(), 3)
+
+        # The user deletes request 102 in Seerr.
+        remaining = [r for r in self.payload["results"] if r["id"] != 102]
+        self._sync(remaining, force_reconcile=True)
+
+        ids = set(TrackedRequest.objects.values_list("remote_id", flat=True))
+        self.assertEqual(ids, {101, 103})
+
+    def test_its_events_and_diagnosis_go_with_it(self):
+        self._sync(self.payload["results"])
+        tracked = TrackedRequest.objects.get(remote_id=102)
+        TimelineEvent.objects.create(
+            request=tracked,
+            source_kind=ServiceKind.RADARR,
+            event_type=EventType.GRABBED,
+            occurred_at="2026-07-02T18:30:00Z",
+            summary="Grabbed",
+            dedupe_key="x",
+        )
+        remaining = [r for r in self.payload["results"] if r["id"] != 102]
+        self._sync(remaining, force_reconcile=True)
+        self.assertFalse(TimelineEvent.objects.filter(request_id=tracked.pk).exists())
+
+    def test_a_normal_sync_does_not_delete(self):
+        """Only a full walk can distinguish "gone" from "stopped looking"."""
+        self._sync(self.payload["results"], force_reconcile=True)
+        remaining = [r for r in self.payload["results"] if r["id"] != 102]
+
+        from core.models import IngestCursor
+
+        # Reconcile has just run, so the next ordinary sync must leave things alone.
+        cursor = IngestCursor.objects.get(service=self.seerr, scope="requests")
+        self.assertIsNotNone(cursor.last_reconcile)
+        self._sync(remaining)
+        self.assertTrue(TrackedRequest.objects.filter(remote_id=102).exists())
+
+    def test_a_failed_walk_never_deletes(self):
+        """Deleting on a partial list would wipe real data on a transient outage."""
+        from core.clients.base import ServiceError
+        from core.clients.requestmanager import SeerrClient
+
+        self._sync(self.payload["results"])
+        self.assertEqual(TrackedRequest.objects.count(), 3)
+
+        def failing(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, json={})
+
+        client = SeerrClient(self.seerr)
+        with mock_client(client, failing), mock.patch(
+            "core.ingest.requests.request_manager_client", return_value=client
+        ):
+            with self.assertRaises(ServiceError):
+                sync_service_requests(self.seerr, force_reconcile=True)
+
+        self.assertEqual(TrackedRequest.objects.count(), 3)
+
+    def test_requests_older_than_the_cutoff_are_left_alone(self):
+        """They were never walked, so their absence from the list means nothing."""
+        from django.utils import timezone as tz
+
+        self._sync(self.payload["results"])
+        old = TrackedRequest.objects.create(
+            service=self.seerr,
+            remote_id=999,
+            media_type="movie",
+            requested_at=tz.now() - tz.timedelta(days=400),
+        )
+        self._sync(self.payload["results"], force_reconcile=True)
+        self.assertTrue(TrackedRequest.objects.filter(pk=old.pk).exists())

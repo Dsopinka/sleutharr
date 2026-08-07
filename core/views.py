@@ -87,8 +87,17 @@ def dashboard(request):
     # Split by whether there is anything the user could actually do. A film that is not
     # out until 2027 is a countdown, not a fault, and leaving it in the main list means
     # the dashboard is never empty even when nothing is wrong.
-    requests = [r for r in everything if not _is_just_waiting(r)]
-    waiting = [r for r in everything if _is_just_waiting(r)]
+    #
+    # Not when a filter is applied, though: clicking the "Not out yet" chip and getting
+    # an empty table -- because the only matches were tucked into the collapsed section
+    # below -- looks exactly like a broken link. An explicit filter is a request to see
+    # those items, so it overrides the split.
+    filtering = bool(code or severity)
+    if filtering:
+        requests, waiting = everything, []
+    else:
+        requests = [r for r in everything if not _is_just_waiting(r)]
+        waiting = [r for r in everything if _is_just_waiting(r)]
     counts = (
         Diagnosis.objects.filter(request__in=_unfulfilled())
         .values("code", "severity")

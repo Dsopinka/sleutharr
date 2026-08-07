@@ -7,7 +7,10 @@
   {# ?v= busts the browser cache on upgrade, so a container update cannot leave users on the previous release's stylesheet. #}
   <link rel="stylesheet" href="{% static 'core/app.css' %}?v={{ app_version }}">
   <script src="{% static 'core/htmx.min.js' %}?v={{ app_version }}" defer></script>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128373;</text></svg>">
+  {# SVG first for crisp high-DPI tabs, PNG as the fallback. Same art as the Unraid icon. #}
+  <link rel="icon" type="image/svg+xml" href="{% static 'core/icon.svg' %}?v={{ app_version }}">
+  <link rel="alternate icon" type="image/png" href="{% static 'core/icon.png' %}?v={{ app_version }}">
+  <link rel="apple-touch-icon" href="{% static 'core/icon.png' %}?v={{ app_version }}">
 </head>
 <body>
 <nav class="topbar">

@@ -37,20 +37,38 @@ def sync_requests() -> None:
             logger.warning("Request sync failed for %s: %s", service.name, exc)
 
 
-def sync_service_requests(service: ServiceInstance) -> int:
+def _reconcile_due(cursor: IngestCursor) -> bool:
+    """Whether it is time for a full walk that can notice deletions.
+
+    The normal sync stops as soon as it recognises records, which is what keeps it cheap
+    -- but it also means a request deleted upstream is never revisited and lingers here
+    forever. A periodic complete walk is the only way to see an absence.
+    """
+    minutes = float(AppSetting.get("reconcile_minutes", 30) or 30)
+    last = cursor.last_reconcile
+    return last is None or (timezone.now() - last) >= timedelta(minutes=minutes)
+
+
+def sync_service_requests(service: ServiceInstance, force_reconcile: bool = False) -> int:
     """Pull requests for one request-manager instance.
 
     On first run this walks the full history back to the configured cutoff. Afterwards it
     stops early once it reaches records it already has -- results are sorted newest-first,
     so the first run of already-seen records means everything older is also stored.
+
+    Periodically it instead walks everything, so that requests deleted in the request
+    manager can be removed here too.
     """
     client = request_manager_client(service)
     cursor, _ = IngestCursor.objects.get_or_create(service=service, scope="requests")
     backfill_days = int(AppSetting.get("backfill_days", 90))
     cutoff = timezone.now() - timedelta(days=backfill_days)
 
+    reconciling = force_reconcile or _reconcile_due(cursor)
     seen_existing_streak = 0
     processed = 0
+    seen_ids: set[int] = set()
+    walked_everything = False
 
     try:
         with client:
@@ -62,21 +80,28 @@ def sync_service_requests(service: ServiceInstance) -> int:
                     cursor.backfill_complete = True
                     break
 
+                seen_ids.add(parsed.remote_id)
                 tracked, created, changed = _upsert(service, parsed, client)
                 processed += 1
 
                 if not created and not changed:
                     seen_existing_streak += 1
                     # 25 consecutive untouched records means we have caught up. Not 1 --
-                    # an edited older request can appear among newer ones.
-                    if cursor.backfill_complete and seen_existing_streak >= 25:
+                    # an edited older request can appear among newer ones. Skipped while
+                    # reconciling, which has to see every record to trust an absence.
+                    if (
+                        not reconciling
+                        and cursor.backfill_complete
+                        and seen_existing_streak >= 25
+                    ):
                         break
                 else:
                     seen_existing_streak = 0
 
             else:
-                # Ran out of pages without breaking: the full history is stored.
+                # Ran out of pages without breaking: we have seen the whole list.
                 cursor.backfill_complete = True
+                walked_everything = True
 
         client.record_success()
     except ServiceError as exc:
@@ -85,10 +110,58 @@ def sync_service_requests(service: ServiceInstance) -> int:
     finally:
         client.close()
 
+    removed = 0
+    if reconciling and walked_everything:
+        removed = _remove_deleted(service, seen_ids, cutoff)
+        cursor.last_reconcile = timezone.now()
+
     cursor.high_water = timezone.now()
-    cursor.save(update_fields=["high_water", "backfill_complete", "updated_at"])
-    logger.info("%s: processed %d requests", service.name, processed)
+    cursor.save(
+        update_fields=[
+            "high_water",
+            "backfill_complete",
+            "last_reconcile",
+            "updated_at",
+        ]
+    )
+    logger.info(
+        "%s: processed %d requests%s",
+        service.name,
+        processed,
+        f", removed {removed} deleted upstream" if removed else "",
+    )
     return processed
+
+
+def _remove_deleted(
+    service: ServiceInstance, seen_ids: set[int], cutoff
+) -> int:
+    """Drop local requests that no longer exist in the request manager.
+
+    Only ever called after a walk that completed without error and without stopping
+    early, because deleting on the strength of a partial list would wipe real data on a
+    transient failure.
+
+    Scoped to the backfill window as well: anything older than the cutoff was never
+    walked, so its absence from `seen_ids` means nothing.
+    """
+    stale = TrackedRequest.objects.filter(
+        service=service, requested_at__gte=cutoff
+    ).exclude(remote_id__in=seen_ids)
+
+    titles = list(stale.values_list("title", flat=True)[:10])
+    count = stale.count()
+    if not count:
+        return 0
+
+    stale.delete()
+    logger.info(
+        "%s: removed %d request(s) deleted upstream: %s",
+        service.name,
+        count,
+        ", ".join(t or "(untitled)" for t in titles),
+    )
+    return count
 
 
 @transaction.atomic
@@ -116,7 +189,7 @@ def _upsert(
     tracked.is_4k = parsed.is_4k
     tracked.requested_seasons = parsed.seasons
     tracked.arr_title_slug = parsed.keys.external_service_slug
-    tracked.plex_rating_key = parsed.keys.rating_key
+    tracked.media_server_item_id = parsed.keys.rating_key
     tracked.last_polled = timezone.now()
     tracked.raw = parsed.raw
 

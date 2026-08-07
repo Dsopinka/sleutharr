@@ -462,6 +462,9 @@ class IngestCursor(models.Model):
     high_water = models.DateTimeField(null=True, blank=True)
     last_page = models.IntegerField(default=0)
     backfill_complete = models.BooleanField(default=False)
+    # When we last walked the whole list rather than stopping early. Only a complete
+    # walk can tell "deleted upstream" from "already seen, stopped looking".
+    last_reconcile = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -558,6 +561,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "plex_grace_minutes": 60,
     # Rule 8: grab/fail cycles on one title before it is a loop.
     "blocklist_loop_threshold": 3,
+    # How often to walk the full request list so deletions upstream are noticed.
+    "reconcile_minutes": 30,
 }
 
 #: Booleans are kept apart from the numeric tunables so the settings form can render them

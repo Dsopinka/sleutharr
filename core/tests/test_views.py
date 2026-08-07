@@ -330,3 +330,38 @@ class WaitingSectionTests(TestCase):
         self._with_code("NOT_RELEASED_YET", 603, "Future Film")
         response = self.client.get(reverse("dashboard"))
         self.assertContains(response, "Nothing needs attention")
+
+
+class WaitingFilterTests(TestCase):
+    """Reported from a live instance: clicking the "Not out yet" chip did nothing.
+
+    The matches were being routed into the collapsed section, leaving the main table
+    empty -- which looks exactly like a broken link.
+    """
+
+    def setUp(self):
+        from core.models import Diagnosis, Severity
+
+        self.seerr = make_service(
+            ServiceKind.REQUEST_MANAGER, name="Seerr", variant=ServiceVariant.SEERR
+        )
+        self.radarr = make_service(ServiceKind.RADARR, name="Radarr")
+        tracked = make_request(
+            service=self.seerr, arr_service=self.radarr, title="Future Film"
+        )
+        Diagnosis.objects.create(
+            request=tracked,
+            code="NOT_RELEASED_YET",
+            severity=Severity.INFO,
+            message="not out",
+        )
+
+    def test_filtering_by_a_waiting_code_shows_the_match(self):
+        response = self.client.get(reverse("dashboard"), {"code": "NOT_RELEASED_YET"})
+        self.assertContains(response, "Future Film")
+        self.assertNotContains(response, "Nothing needs attention")
+
+    def test_unfiltered_still_tucks_it_away(self):
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Nothing needs attention")
+        self.assertContains(response, "nothing to do")
