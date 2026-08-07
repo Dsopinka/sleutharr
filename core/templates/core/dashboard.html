@@ -4,9 +4,13 @@
 {% block content %}
 <h1>Unfulfilled requests</h1>
 <p class="subtitle">
-  {{ total_unfulfilled }} thing{{ total_unfulfilled|pluralize }} you asked for that
-  {{ total_unfulfilled|pluralize:"has,have" }} not arrived yet, oldest first.
-  {% if undiagnosed %}{{ undiagnosed }} still being worked out.{% endif %}
+  {% if total_unfulfilled %}
+    {{ total_unfulfilled }} thing{{ total_unfulfilled|pluralize }} that need{{ total_unfulfilled|pluralize:"s," }}
+    a look, oldest first.
+    {% if undiagnosed %}{{ undiagnosed }} still being worked out.{% endif %}
+  {% else %}
+    Nothing needs attention.
+  {% endif %}
 </p>
 
 {% if no_services %}
@@ -29,5 +33,16 @@
   </div>
 
   {% include "core/_request_table.html" %}
+
+  {% if waiting %}
+    <details class="waiting-block">
+      <summary>
+        {{ total_waiting }} more with nothing to do &mdash; not out yet, or declined
+      </summary>
+      <div style="margin-top:10px">
+        {% include "core/_request_table.html" with requests=waiting %}
+      </div>
+    </details>
+  {% endif %}
 {% endif %}
 {% endblock %}

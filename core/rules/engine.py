@@ -41,7 +41,7 @@ def diagnose_request(tracked: TrackedRequest, settings: dict | None = None) -> D
     events = list(tracked.events.select_related("service").order_by("occurred_at", "id"))
     ctx = RuleContext(tracked, events, settings=settings)
 
-    if tracked.availability == MediaAvailability.AVAILABLE:
+    if tracked.is_fulfilled:
         verdict = Verdict(
             code=FULFILLED_CODE,
             severity=Severity.OK,

@@ -304,7 +304,33 @@ class TrackedRequest(models.Model):
 
     @property
     def is_fulfilled(self) -> bool:
-        return self.availability == MediaAvailability.AVAILABLE
+        """Whether what was *asked for* has arrived.
+
+        Availability describes the whole show, not this request. Seerr marks a series
+        PARTIALLY_AVAILABLE while any season is missing, so a request for one season of
+        an ongoing show is never AVAILABLE however completely it was delivered -- and it
+        would sit on the dashboard forever with nothing wrong with it.
+
+        The request's own status is the right unit. It is paired with a media-server
+        check so a request that completed and later broke still surfaces rather than
+        being hidden by a status that never changes back.
+        """
+        if self.availability == MediaAvailability.AVAILABLE:
+            return True
+        return (
+            self.request_state == RequestState.COMPLETED
+            and self.media_server_found is not False
+        )
+
+    @staticmethod
+    def fulfilled_q():
+        """Queryset form of `is_fulfilled`, kept beside it so they cannot drift."""
+        from django.db.models import Q
+
+        return Q(availability=MediaAvailability.AVAILABLE) | (
+            Q(request_state=RequestState.COMPLETED)
+            & ~Q(media_server_found=False)
+        )
 
     @property
     def age_days(self) -> int:

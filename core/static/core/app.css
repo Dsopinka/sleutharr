@@ -532,3 +532,14 @@ table.discovery input[type=checkbox] { width: auto; }
   border-radius: 4px;
   padding: 1px 5px;
 }
+
+/* "Nothing to do" requests, tucked away so the dashboard can actually reach empty. */
+.waiting-block { margin-top: 22px; }
+.waiting-block > summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.waiting-block > summary:hover { color: var(--text-dim); }

@@ -208,3 +208,125 @@ class TimelineCollapseTests(TestCase):
         # A genuine grab -> fail -> grab cycle must still read as three things.
         self.assertEqual(response.content.count(b"Grabbed A"), 2)
         self.assertNotContains(response, "&times;2")
+
+
+class FulfilmentTests(TestCase):
+    """Found on a live instance: a fully-delivered season sat on the dashboard forever.
+
+    Seerr marks a *show* PARTIALLY_AVAILABLE while any season is missing, so a request
+    for one season of an ongoing series is never AVAILABLE however completely it was
+    delivered. The request's own status is the right unit.
+    """
+
+    def setUp(self):
+        from core.models import MediaAvailability, RequestState
+
+        self.MediaAvailability = MediaAvailability
+        self.RequestState = RequestState
+        self.seerr = make_service(
+            ServiceKind.REQUEST_MANAGER, name="Seerr", variant=ServiceVariant.SEERR
+        )
+        self.radarr = make_service(ServiceKind.RADARR, name="Sonarr")
+
+    def _request(self, **kwargs):
+        tracked = make_request(service=self.seerr, arr_service=self.radarr, **kwargs)
+        return tracked
+
+    def test_completed_request_on_a_partially_available_show_is_done(self):
+        tracked = self._request()
+        tracked.request_state = self.RequestState.COMPLETED
+        tracked.availability = self.MediaAvailability.PARTIALLY_AVAILABLE
+        tracked.media_server_found = True
+        tracked.save()
+
+        self.assertTrue(tracked.is_fulfilled)
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, "Dune: Part Two")
+
+    def test_completed_but_missing_from_the_media_server_still_shows(self):
+        """A request that completed and later broke must not be hidden by a stale status."""
+        tracked = self._request()
+        tracked.request_state = self.RequestState.COMPLETED
+        tracked.availability = self.MediaAvailability.PARTIALLY_AVAILABLE
+        tracked.media_server_found = False
+        tracked.save()
+
+        self.assertFalse(tracked.is_fulfilled)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Dune: Part Two")
+
+    def test_available_is_still_fulfilled(self):
+        tracked = self._request()
+        tracked.availability = self.MediaAvailability.AVAILABLE
+        tracked.save()
+        self.assertTrue(tracked.is_fulfilled)
+
+    def test_partially_available_and_not_completed_is_not_fulfilled(self):
+        tracked = self._request()
+        tracked.request_state = self.RequestState.APPROVED
+        tracked.availability = self.MediaAvailability.PARTIALLY_AVAILABLE
+        tracked.save()
+        self.assertFalse(tracked.is_fulfilled)
+
+    def test_queryset_and_property_agree(self):
+        """They are written separately, so they are checked against each other."""
+        from core.models import TrackedRequest
+
+        cases = [
+            (self.RequestState.COMPLETED, self.MediaAvailability.PARTIALLY_AVAILABLE, True),
+            (self.RequestState.COMPLETED, self.MediaAvailability.PARTIALLY_AVAILABLE, False),
+            (self.RequestState.APPROVED, self.MediaAvailability.AVAILABLE, None),
+            (self.RequestState.APPROVED, self.MediaAvailability.PROCESSING, None),
+            (self.RequestState.PENDING, self.MediaAvailability.PENDING, False),
+        ]
+        for index, (state, availability, found) in enumerate(cases):
+            tracked = self._request(remote_id=500 + index)
+            tracked.request_state = state
+            tracked.availability = availability
+            tracked.media_server_found = found
+            tracked.save()
+
+        by_property = {
+            r.pk for r in TrackedRequest.objects.all() if r.is_fulfilled
+        }
+        by_queryset = set(
+            TrackedRequest.objects.filter(TrackedRequest.fulfilled_q()).values_list(
+                "pk", flat=True
+            )
+        )
+        self.assertEqual(by_property, by_queryset)
+
+
+class WaitingSectionTests(TestCase):
+    """Verdicts with nothing to do should not keep the dashboard permanently non-empty."""
+
+    def setUp(self):
+        self.seerr = make_service(
+            ServiceKind.REQUEST_MANAGER, name="Seerr", variant=ServiceVariant.SEERR
+        )
+        self.radarr = make_service(ServiceKind.RADARR, name="Radarr")
+
+    def _with_code(self, code, remote_id, title):
+        from core.models import Diagnosis, Severity
+
+        tracked = make_request(
+            service=self.seerr, arr_service=self.radarr, remote_id=remote_id, title=title
+        )
+        Diagnosis.objects.create(
+            request=tracked, code=code, severity=Severity.INFO, message="x"
+        )
+        return tracked
+
+    def test_not_released_is_moved_out_of_the_main_list(self):
+        self._with_code("NOT_RELEASED_YET", 601, "Future Film")
+        self._with_code("UNMONITORED", 602, "Broken Film")
+
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "nothing to do")
+        # Both render, but the count in the headline covers only the actionable one.
+        self.assertContains(response, "1 thing that needs")
+
+    def test_dashboard_can_reach_empty(self):
+        self._with_code("NOT_RELEASED_YET", 603, "Future Film")
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Nothing needs attention")

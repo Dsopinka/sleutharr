@@ -50,16 +50,27 @@ EXPLAINABLE_CODES = {"NO_RELEASE_FOUND", "NEVER_SEARCHED", "BLOCKLIST_LOOP", "WR
 
 
 def _unfulfilled() -> "models.QuerySet[TrackedRequest]":
-    """Every request that has not landed in the media server yet.
+    """Every request that has not arrived yet.
 
     The dashboard is the product: it answers "what did I ask for that never arrived",
     so fulfilled requests are excluded unless the user searches for them explicitly.
     """
     return (
-        TrackedRequest.objects.exclude(availability=MediaAvailability.AVAILABLE)
+        TrackedRequest.objects.exclude(TrackedRequest.fulfilled_q())
         .select_related("diagnosis", "service", "arr_service")
         .order_by("requested_at")
     )
+
+
+#: Verdicts that mean "there is nothing for you to do here". These are real answers, not
+#: problems, and they can sit unchanged for months -- a film not released until 2027 would
+#: otherwise keep the dashboard permanently non-empty.
+WAITING_CODES = {"NOT_RELEASED_YET", "DECLINED"}
+
+
+def _is_just_waiting(tracked) -> bool:
+    diagnosis = getattr(tracked, "diagnosis", None)
+    return bool(diagnosis and diagnosis.code in WAITING_CODES)
 
 
 def dashboard(request):
@@ -72,7 +83,12 @@ def dashboard(request):
     if code:
         qs = qs.filter(diagnosis__code=code)
 
-    requests = list(qs)
+    everything = list(qs)
+    # Split by whether there is anything the user could actually do. A film that is not
+    # out until 2027 is a countdown, not a fault, and leaving it in the main list means
+    # the dashboard is never empty even when nothing is wrong.
+    requests = [r for r in everything if not _is_just_waiting(r)]
+    waiting = [r for r in everything if _is_just_waiting(r)]
     counts = (
         Diagnosis.objects.filter(request__in=_unfulfilled())
         .values("code", "severity")
@@ -85,7 +101,9 @@ def dashboard(request):
         "diagnosis_counts": counts,
         "active_severity": severity,
         "active_code": code,
+        "waiting": waiting,
         "total_unfulfilled": len(requests),
+        "total_waiting": len(waiting),
         "undiagnosed": sum(1 for r in requests if not hasattr(r, "diagnosis")),
         "no_services": not ServiceInstance.objects.filter(enabled=True).exists(),
     }
