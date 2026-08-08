@@ -18,15 +18,9 @@ call.
 | Deluge | 2.2.0 (2026-08-08) | **was completely broken** — Finding 16 |
 | NZBGet | 26.2 (2026-08-08) | permille `Health` confirmed |
 | Jellyfin | 10.11.11 (2026-08-08) | **TV id join was broken** — Findings 17, 19 |
-| Emby | 4.9.5.0 (2026-08-08) | probe, paths and pagination confirmed; see caveat below |
+| Emby | 4.9.5.0 (2026-08-08) | **same TV id trap, plus Finding 17b** |
 | Ombi | 4.53.10 (2026-08-08) | **deleted requests, and tracked no TV** — Findings 18, 18b |
 | Seerr/Overseerr, Sonarr, Radarr, qBittorrent, Plex | schema/source only | not yet driven live |
-
-Emby's caveat, stated plainly because "verified" should mean one thing: its probe,
-`/Items` pagination, flat `Path` and `SeriesId` were all confirmed against the running
-server, but the instance never populated `ProviderIds` (it fetched no metadata), so the
-id join itself is confirmed on Jellyfin only. Emby is known to expose the same `SeriesId`
-the fix depends on; it is not known to return the same provider ids for it.
 
 Items marked **[UNVERIFIED-LIVE]** are the ones most worth re-checking once real
 credentials exist; `python manage.py probe_services` re-runs those checks and prints what
@@ -815,6 +809,35 @@ untouched and the basename search finds it. That is genuine file-level evidence,
 is what lets television reach the diagnosis honestly. Without it the verdict falls back
 to "not in your library yet, trigger a scan", which covers both cases and overclaims
 neither.
+
+## Finding 17b — a film carries a TVDB id too, and it is not a series id
+
+Found on Emby only because Emby had to be forced to fetch metadata at all, which turned
+out to be worth the trouble. Big Buck Bunny, a **film**, reports:
+
+```json
+"ProviderIds": {"Tmdb": "10378", "Tvdb": "12352", "IMDB": "tt1254207"}
+```
+
+That `Tvdb` is TheTVDB's *movie* entry. A television request carries a TVDB **series**
+id, and series 12352 is a real and entirely unrelated show — so comparing the two matches
+a film and reports it as the requested programme, sitting in the library, with a path.
+
+The same trap faces the other way: TMDB numbers shows and films separately, so a request
+for a series carries a TMDB show id which can equally collide with some film's TMDB id.
+
+This is Finding 17 one level up — episode-vs-series ids there, movie-vs-series ids here —
+and it generalises to a rule worth applying to any provider id, including the next
+product added: **an id is only comparable to another id of the same kind of thing.**
+Films are matched against film items and television against episode and series items;
+`core/ingest/mediaserver.py::_same_kind` is the only place that decides it.
+
+Getting metadata out of Emby at all, for the record: a library created through
+`POST /Library/VirtualFolders` with an empty body has `TypeOptions: []` and fetches
+nothing, silently. The fetchers have to be set explicitly from
+`GET /Libraries/AvailableOptions`, and even then Emby did not identify the items on
+scan — `POST /Items/RemoteSearch/{Type}` followed by `POST /Items/RemoteSearch/Apply/{id}`
+is what actually populated the ids.
 
 ## Finding 18 — Ombi's `/Status` is anonymous, but rejects a key it does not like
 

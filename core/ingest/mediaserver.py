@@ -28,6 +28,7 @@ from core.ingest.events import clear_events, record_event
 from core.models import (
     EventType,
     MediaAvailability,
+    MediaType,
     PathMapping,
     ServiceInstance,
     ServiceKind,
@@ -187,11 +188,40 @@ def _find_by_id(
     # unrelated shows. See JellyfinClient._parse_item.
     if tracked.tmdb_id or tracked.tvdb_id:
         for item in index.values():
+            if not _same_kind(item, tracked.media_type):
+                continue
             if tracked.tmdb_id and item.tmdb_id == tracked.tmdb_id:
                 return item
             if tracked.tvdb_id and item.tvdb_id == tracked.tvdb_id:
                 return item
     return None
+
+
+#: Library item types, by the kind of request they can possibly satisfy. Plex spells
+#: these in lower case and Jellyfin/Emby capitalise them, so comparison is case-folded.
+_KIND_BY_MEDIA_TYPE = {
+    MediaType.MOVIE: {"movie"},
+    MediaType.TV: {"episode", "season", "series"},
+}
+
+
+def _same_kind(item: MediaItem, media_type: str) -> bool:
+    """Whether this library item could possibly be what the request asked for.
+
+    Both providers number films and shows separately, and both hand the two out under
+    the same field name. Observed on a live Emby: Big Buck Bunny, a film, reports
+    `Tvdb: 12352` -- TheTVDB's *movie* entry for it. A television request whose series
+    id happened to be 12352 would match that film and be reported as in the library.
+
+    The same holds for tmdb in the other direction, since a request for a show carries
+    TMDB's show id while a movie item carries TMDB's movie id. Neither is a bug in the
+    server: they are simply different id spaces that share a spelling, and the only safe
+    rule is to compare ids within one kind of thing.
+    """
+    kinds = _KIND_BY_MEDIA_TYPE.get(media_type)
+    if not kinds:
+        return True  # media type unknown, so nothing to narrow by
+    return item.item_type.lower() in kinds
 
 
 def _check_request(

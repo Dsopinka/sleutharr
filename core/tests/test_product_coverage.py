@@ -893,3 +893,85 @@ class OmbiTelevisionLivesOnTheChild(TestCase):
         self.assertEqual(
             list(self._client().parse_ombi_tv({**self.PARENT, "childRequests": []})), []
         )
+
+
+class IdsOnlyMatchWithinOneKind(TestCase):
+    """Films and shows are numbered separately, under the same field name.
+
+    Observed on a live Emby 4.9.5.0: Big Buck Bunny, a film, reports
+    `ProviderIds: {"Tmdb": "10378", "Tvdb": "12352", ...}`. That `Tvdb` is TheTVDB's
+    *movie* entry. A television request carries a TVDB *series* id, and series 12352 is
+    a real and completely unrelated show -- so comparing the two matches a film and
+    reports it as the requested programme sitting in the library.
+
+    Same shape as Finding 17, one level up: not episode-vs-series ids this time but
+    movie-vs-series ids. Neither is a fault in the server. They are different id spaces
+    that share a spelling, and the only safe rule is to compare within one kind.
+    """
+
+    EMBY_MOVIE = {
+        "Id": "10",
+        "Name": "Big Buck Bunny",
+        "Type": "Movie",
+        "Path": "/data/media/movies/Big Buck Bunny (2008)/Big Buck Bunny (2008).mp4",
+        "ProviderIds": {
+            "Tmdb": "10378",
+            "Tvdb": "12352",
+            "IMDB": "tt1254207",
+        },
+    }
+
+    def _index(self):
+        from core.clients.mediaserver import normalise_path
+
+        item = EmbyClient._parse_item(self.EMBY_MOVIE)
+        return {normalise_path(item.paths[0]): item}
+
+    def _ask(self, media_type, **ids):
+        from core.ingest.mediaserver import _find_by_id
+        from core.models import ServiceKind, ServiceVariant, TrackedRequest
+        from core.tests.factories import make_service
+
+        service = make_service(
+            ServiceKind.REQUEST_MANAGER, name=f"seerr-{media_type}-{ids}"
+        )
+        make_service(
+            ServiceKind.MEDIA_SERVER,
+            name=f"emby-{media_type}-{ids}",
+            variant=ServiceVariant.EMBY,
+            base_url="http://emby:8096",
+        )
+        tracked = TrackedRequest(
+            service=service, remote_id=1, title="x", media_type=media_type, **ids
+        )
+        # No stored server id, so _find_by_id never calls out; the client is unused.
+        return _find_by_id(None, tracked, self._index())
+
+    def test_a_tv_request_does_not_match_a_film_by_its_tvdb_movie_id(self):
+        from core.models import MediaType
+
+        self.assertIsNone(
+            self._ask(MediaType.TV, tvdb_id=12352),
+            "a TV request matched a film through TheTVDB's movie id",
+        )
+
+    def test_a_tv_request_does_not_match_a_film_by_its_tmdb_movie_id(self):
+        """The same trap facing the other way: TMDB numbers shows separately too."""
+        from core.models import MediaType
+
+        self.assertIsNone(
+            self._ask(MediaType.TV, tmdb_id=10378),
+            "a TV request matched a film through TheMovieDb's movie id",
+        )
+
+    def test_a_movie_request_still_matches_the_film(self):
+        """The guard must not cost us the match it is protecting."""
+        from core.models import MediaType
+
+        found = self._ask(MediaType.MOVIE, tmdb_id=10378)
+        self.assertIsNotNone(found)
+        self.assertEqual(found.title, "Big Buck Bunny")
+
+    def test_an_unknown_media_type_still_matches(self):
+        """Nothing to narrow by is not a reason to stop answering."""
+        self.assertIsNotNone(self._ask("", tmdb_id=10378))
