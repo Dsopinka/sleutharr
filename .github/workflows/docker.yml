@@ -110,4 +110,5 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ secrets.DOCKERHUB_USERNAME }}/sleutharr
           readme-filepath: ./docs/dockerhub.md
-          short-description: "Traces a media request across Seerr, Sonarr/Radarr, your download client and Plex, and tells you where it died."
+          # Docker Hub caps this at 100 characters and rejects anything longer.
+          short-description: "Traces a stuck media request across Seerr, Sonarr/Radarr, your downloader and Plex."
