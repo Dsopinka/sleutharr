@@ -97,10 +97,15 @@ class RuleContext:
         """Download-client progress samples, oldest first."""
         return self.of_type(EventType.DOWNLOAD_PROGRESS)
 
-    def torrent_state(self) -> dict:
-        """Raw payload of the most recent download-client sample."""
+    def download_facts(self) -> dict:
+        """Normalised state of the most recent download-client sample.
+
+        Never the raw payload: field names differ per product, so a rule reading `raw`
+        quietly reports zeros for every client it was not written against. Empty when
+        the sample predates the facts field, which callers must read as "unknown".
+        """
         latest = self.latest(EventType.DOWNLOAD_PROGRESS)
-        return latest.raw if latest and isinstance(latest.raw, dict) else {}
+        return latest.facts if latest and isinstance(latest.facts, dict) else {}
 
     # -- links -----------------------------------------------------------------
 

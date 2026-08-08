@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install guide
+    url: https://github.com/Dsopinka/sleutharr/blob/main/docs/install-guide.md
+    about: Step-by-step Unraid setup, including the localhost trap that catches most people.
+  - name: Website
+    url: https://sleutharr.com
+    about: What it does and what each verdict means.

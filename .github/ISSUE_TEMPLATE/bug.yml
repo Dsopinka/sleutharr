@@ -1,0 +1,51 @@
+name: Something is broken
+description: A crash, a page that will not load, a service that will not connect.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do to cause it?
+      placeholder: |
+        1. Went to Settings
+        2. Pressed "Find my other services"
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container logs
+      description: >
+        Unraid: Docker tab → click Sleutharr → Logs. Otherwise
+        `docker logs --tail 100 sleutharr`. Paste the part around the failure.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Sleutharr version
+      description: Shown in the footer of every page.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where is it running?
+      options:
+        - Unraid
+        - Docker / docker compose
+        - From source
+        - Somewhere else
+    validations:
+      required: true

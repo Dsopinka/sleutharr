@@ -1,0 +1,53 @@
+name: Service support
+description: A service that will not connect, or a request to support a new one.
+title: "Service: "
+labels: ["service-support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Several integrations are written against their documented APIs but have never
+        been pointed at a live instance — Ombi, Jellyfin, Emby, NZBGet, Transmission and
+        Deluge. If you are the first person to try one, reports are especially welcome,
+        whether it worked or not.
+
+  - type: input
+    id: service
+    attributes:
+      label: Which service, and which version?
+      placeholder: "NZBGet 24.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: What happened?
+      options:
+        - It will not connect at all
+        - It connects but the data looks wrong
+        - It works, and I am reporting that it works
+        - Please add support for something not on the list
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: Details
+      description: >
+        For connection problems, the exact message from **Test** on the Health page. For
+        wrong data, what you see versus what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe
+    attributes:
+      label: Output of the probe command (optional, very helpful)
+      description: >
+        Run from Unraid's web terminal or your Docker host. It prints the field names
+        each service actually returns, which is usually enough to find the problem
+        without any guessing. It prints no API keys.
+      value: "docker exec Sleutharr python manage.py probe_services --verify"
+      render: shell

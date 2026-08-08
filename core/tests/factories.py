@@ -132,3 +132,42 @@ def torrent_sample(progress: float, **overrides) -> dict:
     }
     base.update(overrides)
     return base
+
+
+def download_facts(raw: dict, *, usenet: bool = False) -> dict:
+    """Normalise a raw client payload the way the ingester does.
+
+    Deliberately runs the real product parser rather than hand-writing the normalised
+    dict: a test that invents its own facts would keep passing if a parser broke, which
+    is exactly the failure that let usenet downloads be diagnosed as dead torrents.
+    """
+    from core.clients.download import QBittorrentClient, SabnzbdClient
+
+    item = (
+        SabnzbdClient._parse_queue_slot(raw)
+        if usenet
+        else QBittorrentClient._parse(raw)
+    )
+    return item.facts()
+
+
+def add_download_sample(
+    request: TrackedRequest,
+    raw: dict,
+    *,
+    usenet: bool = False,
+    hours_ago: float = 1,
+    **kwargs,
+) -> TimelineEvent:
+    """A DOWNLOAD_PROGRESS event carrying both the raw payload and normalised facts."""
+    event = add_event(
+        request,
+        EventType.DOWNLOAD_PROGRESS,
+        hours_ago=hours_ago,
+        raw=raw,
+        source_kind=kwargs.pop("source_kind", ServiceKind.DOWNLOAD_CLIENT),
+        **kwargs,
+    )
+    event.facts = download_facts(raw, usenet=usenet)
+    event.save(update_fields=["facts"])
+    return event

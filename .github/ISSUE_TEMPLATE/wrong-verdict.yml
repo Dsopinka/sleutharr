@@ -1,0 +1,74 @@
+name: Sleutharr got it wrong
+description: A verdict that is incorrect, misleading, or missing entirely.
+title: "Wrong verdict: "
+labels: ["wrong-verdict"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful report you can file. Nearly every real bug found so far
+        has been a verdict that was confidently wrong about somebody's actual setup —
+        the test suite cannot catch those, only real data can.
+
+  - type: input
+    id: verdict
+    attributes:
+      label: What did it say?
+      description: The heading on the request, and the code beside it.
+      placeholder: "Not showing up in your media server — NOT_IN_MEDIA_SERVER"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What is actually true?
+      description: What is really going on with this request, as far as you can tell.
+      placeholder: "The file is in Plex and plays fine. I checked the path and it matches."
+    validations:
+      required: true
+
+  - type: textarea
+    id: timeline
+    attributes:
+      label: The timeline
+      description: >
+        Open the request and screenshot the page, or paste the timeline entries. If a
+        raw payload looks relevant, expand it and include that too. Redact anything you
+        would rather not share — API keys never appear here, but paths might.
+    validations:
+      required: true
+
+  - type: textarea
+    id: services
+    attributes:
+      label: Which services, and which versions?
+      description: >
+        The Health page lists all of them with versions. A screenshot of that page is
+        the quickest way.
+      placeholder: |
+        Seerr 3.4.1, Sonarr 4.0.19, Radarr 6.3.0, SABnzbd 5.0.4, Plex 1.43.3
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Sleutharr version
+      description: Shown in the footer of every page.
+      placeholder: "2.7.0"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: shape
+    attributes:
+      label: Anything unusual about your setup?
+      description: These are the shapes most likely to be untested. Tick any that apply.
+      options:
+        - label: More than one Sonarr or Radarr (e.g. a 4K split)
+        - label: More than one download client
+        - label: Usenet (SABnzbd or NZBGet)
+        - label: Jellyfin or Emby rather than Plex
+        - label: Ombi rather than Seerr/Overseerr/Jellyseerr
+        - label: The media server sees files at different paths than the *arr

@@ -47,6 +47,7 @@ DIAGNOSIS_TITLES: dict[str, str] = {
     "DOWNLOADED_NOT_IMPORTED": "Downloaded, but could not be filed away",
     "DOWNLOAD_CLIENT_ERROR": "The download client hit an error",
     "GRABBED_BUT_STALLED": "Download is stuck",
+    "DOWNLOADER_NOT_PROGRESSING": "Your download client is not making progress",
     "PATH_MISMATCH": "Folder paths do not line up",
     "NOT_IN_MEDIA_SERVER": "Not showing up in your media server",
     "WRONG_QUALITY": "Lower quality than you asked for",

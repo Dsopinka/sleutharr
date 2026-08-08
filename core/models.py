@@ -397,6 +397,13 @@ class TimelineEvent(models.Model):
     detail = models.TextField(blank=True)
     raw = models.JSONField(default=dict, blank=True)
 
+    # Normalised, product-agnostic reading of `raw`, written by the ingester that knows
+    # which product it just spoke to. Rules read this and never `raw`: qBittorrent calls
+    # progress "progress" and SABnzbd calls it "percentage", and a rule that reaches into
+    # `raw` silently reads zero for every client it was not written against. Empty on
+    # rows ingested before this field existed, which rules must treat as "unknown".
+    facts = models.JSONField(default=dict, blank=True)
+
     # Natural key for idempotent ingestion: we must never store a history record twice,
     # and pollers re-read overlapping windows by design.
     dedupe_key = models.CharField(max_length=255)

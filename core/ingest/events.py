@@ -30,6 +30,7 @@ def record_event(
     service: ServiceInstance | None = None,
     detail: str = "",
     raw: Any = None,
+    facts: dict | None = None,
     update_existing: bool = False,
 ) -> TimelineEvent | None:
     """Create the event unless it already exists.
@@ -51,6 +52,7 @@ def record_event(
         "summary": summary[:500],
         "detail": detail,
         "raw": raw if raw is not None else {},
+        "facts": facts or {},
     }
 
     try:

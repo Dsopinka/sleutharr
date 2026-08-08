@@ -574,3 +574,46 @@ download is still in flight.
 flow — the *arr already does it. A standalone search command
 (`POST /api/v3/command` with `MoviesSearch`/`SeriesSearch`) exists behind a setting that
 is **off by default**, for the cases where nothing was ever grabbed.
+
+---
+
+## Finding 12 — usenet queue rows share no field names with torrent queue rows
+
+Found from a live SABnzbd instance, not from documentation.
+
+Every download client's queue endpoint returns a flat object describing one transfer, and
+it is tempting to treat them as interchangeable. They are not — they overlap on almost
+nothing:
+
+| Meaning | qBittorrent | SABnzbd | NZBGet |
+|---|---|---|---|
+| identifier | `hash` | `nzo_id` | `NZBID` (Hi/Lo split, see Finding 10) |
+| title | `name` | `filename` | `NZBName` |
+| progress | `progress` (0.0–1.0 float) | `percentage` (0–100 **string**) | derived from `FileSizeLo`/`RemainingSizeLo` |
+| state | `state` | `status` | `Status` |
+| remaining | `amount_left` (bytes) | `mbleft` (megabytes, string) | `RemainingSizeMB` |
+| swarm | `num_seeds`, `num_complete` | *(does not exist)* | *(does not exist)* |
+
+Two consequences worth stating plainly:
+
+**Reading a payload with the wrong product's field names fails silently.** `.get("progress")`
+against a SABnzbd slot returns `None`, which becomes `0.0`, which reads as a download
+that has never started. It does not raise. Nothing in a test suite built on qBittorrent
+fixtures notices.
+
+**Usenet has no swarm, so "zero seeds" is not a state it can be in.** A missing
+`num_seeds` must mean "not applicable", never "no seeds left". Conflating the two turns
+every in-progress usenet download into a dead torrent, and the remediation that follows
+from "dead torrent" is to blocklist the release — which destroys a perfectly good release
+and does not touch the actual cause.
+
+The usenet analogue of a dead swarm is **article health**: the post has partly expired or
+been taken down and cannot be reconstructed. That genuinely does warrant blocklisting.
+Anything else — a paused client, a failed news-server login, an expired subscription, a
+dropped VPN — stalls every download at once and blocklisting is exactly the wrong move,
+because the replacement release will stall in the same place.
+
+This is why `DownloadItem.facts()` exists and why rules read `TimelineEvent.facts` rather
+than `TimelineEvent.raw`. Each product's parser is the only code permitted to know its own
+field names. `core/tests/test_rules.py::UsenetIsNotATorrent` asserts no rule reaches into a
+raw download payload, so the class of bug cannot come back by way of a new rule.

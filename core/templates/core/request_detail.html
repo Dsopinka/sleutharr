@@ -34,6 +34,9 @@
   {% endif %}
   <p class="hint" style="margin-top:9px">
     Evidence is highlighted in the timeline below. Computed {{ diagnosis.computed_at|timesince }} ago.
+    &middot;
+    <a href="https://github.com/Dsopinka/sleutharr/issues/new?template=wrong-verdict.yml&amp;title=Wrong%20verdict%3A%20{{ diagnosis.code|urlencode }}&amp;verdict={{ diagnosis.code|diagnosis_title|urlencode }}%20%E2%80%94%20{{ diagnosis.code|urlencode }}&amp;version={{ app_version }}"
+       target="_blank" rel="noopener">this looks wrong</a>
   </p>
 </div>
 {% else %}

@@ -67,6 +67,18 @@
   {% endif %}
 
   {% if remove.can_act %}
+    {% if diagnosis_code == 'DOWNLOADER_NOT_PROGRESSING' %}
+      {% comment %}
+        The verdict above says the release is fine, so leading with a red blocklist
+        button would contradict it. The button stays -- the user may know better than
+        the rule -- but it should not look like the recommended move.
+      {% endcomment %}
+      <p class="hint" style="margin:0 0 10px">
+        Removing and blocklisting is available below, but it probably will not help here:
+        nothing is wrong with this release. Fix the download client first, and this should
+        resume on its own.
+      </p>
+    {% endif %}
     {% for target in remove.targets %}
     <form method="post" action="{% url 'action_remove' tracked.pk %}"
           hx-post="{% url 'action_remove' tracked.pk %}"

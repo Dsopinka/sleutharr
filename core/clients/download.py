@@ -93,6 +93,30 @@ class DownloadItem:
         """Usenet analogue of losing all seeds."""
         return self.is_usenet and 0 <= self.health < 90
 
+    def facts(self) -> dict:
+        """The normalised view a rule is allowed to reason about.
+
+        Deliberately not `raw`. Every client names these differently, and each product's
+        parser above is the only code that should ever know which name is which.
+        """
+        return {
+            "name": self.name,
+            "state": self.state,
+            "progress": self.progress,
+            "is_usenet": self.is_usenet,
+            "is_complete": self.is_complete,
+            "is_errored": self.is_errored,
+            "is_paused": self.is_paused,
+            "has_no_seeds": self.has_no_seeds,
+            "unhealthy_articles": self.unhealthy_articles,
+            "num_seeds": self.num_seeds,
+            "num_complete": self.num_complete,
+            "health": self.health,
+            "download_rate": self.download_rate,
+            "left": self.left,
+            "error_message": self.error_message,
+        }
+
 
 class DownloadClient(BaseClient):
     """Interface every download client implements."""

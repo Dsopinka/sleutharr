@@ -210,6 +210,7 @@ def _record_item(
         detail=detail,
         dedupe_key=f"dl:{service.pk}:{item.download_id}:sample:{bucket}",
         raw=item.raw,
+        facts=item.facts(),
         update_existing=True,
     )
 

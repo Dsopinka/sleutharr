@@ -23,7 +23,13 @@ from core.models import (
 )
 from core.rules.base import RuleContext
 from core.rules.engine import diagnose_request, evaluate
-from core.tests.factories import add_event, make_request, make_service, torrent_sample
+from core.tests.factories import (
+    add_download_sample,
+    add_event,
+    make_request,
+    make_service,
+    torrent_sample,
+)
 
 
 class RuleTestCase(TestCase):
@@ -224,12 +230,10 @@ class DownloadedNotImportedTests(RuleTestCase):
     def test_complete_torrent_with_no_import_fires(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
         add_event(request, EventType.GRABBED, hours_ago=8)
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(1.0, state="uploading", amount_left=0),
             hours_ago=1,
-            raw=torrent_sample(1.0, state="uploading", amount_left=0),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         verdict = self.verdict_for(request)
         self.assertEqual(verdict.code, "DOWNLOADED_NOT_IMPORTED")
@@ -246,19 +250,15 @@ class GrabbedButStalledTests(RuleTestCase):
     def _stalled_request(self, **sample):
         request = make_request(service=self.seerr, arr_service=self.radarr)
         add_event(request, EventType.GRABBED, hours_ago=30)
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.42, **sample),
             hours_ago=24,
-            raw=torrent_sample(0.42, **sample),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.4205, **sample),
             hours_ago=0.1,
-            raw=torrent_sample(0.4205, **sample),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         return request
 
@@ -270,12 +270,10 @@ class GrabbedButStalledTests(RuleTestCase):
 
     def test_zero_seeds_fires_without_waiting_for_the_window(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.3, num_seeds=0, num_complete=0, dlspeed=0),
             hours_ago=0.2,
-            raw=torrent_sample(0.3, num_seeds=0, num_complete=0, dlspeed=0),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         verdict = self.verdict_for(request)
         self.assertEqual(verdict.code, "GRABBED_BUT_STALLED")
@@ -284,43 +282,35 @@ class GrabbedButStalledTests(RuleTestCase):
     def test_unknown_swarm_count_does_not_fire_zero_seed_branch(self):
         """num_complete == -1 is 'unknown', not 'no seeds'."""
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.3, num_seeds=8, num_complete=-1, dlspeed=900000),
             hours_ago=0.2,
-            raw=torrent_sample(0.3, num_seeds=8, num_complete=-1, dlspeed=900000),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         verdict = self.verdict_for(request)
         self.assertNotEqual(getattr(verdict, "code", None), "GRABBED_BUT_STALLED")
 
     def test_client_error_state_is_its_own_code(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.5, state="missingFiles"),
             hours_ago=0.2,
-            raw=torrent_sample(0.5, state="missingFiles"),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         verdict = self.verdict_for(request)
         self.assertEqual(verdict.code, "DOWNLOAD_CLIENT_ERROR")
 
     def test_healthy_progress_does_not_fire(self):
         request = make_request(service=self.seerr, arr_service=self.radarr)
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.2),
             hours_ago=12,
-            raw=torrent_sample(0.2),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.85),
             hours_ago=0.1,
-            raw=torrent_sample(0.85),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         verdict = self.verdict_for(request)
         self.assertNotEqual(getattr(verdict, "code", None), "GRABBED_BUT_STALLED")
@@ -553,12 +543,10 @@ class EnginePersistenceTests(RuleTestCase):
         request = make_request(
             service=self.seerr, arr_service=self.radarr, monitored=False
         )
-        add_event(
+        add_download_sample(
             request,
-            EventType.DOWNLOAD_PROGRESS,
+            torrent_sample(0.3, num_seeds=0, num_complete=0, dlspeed=0),
             hours_ago=0.1,
-            raw=torrent_sample(0.3, num_seeds=0, num_complete=0, dlspeed=0),
-            source_kind=ServiceKind.DOWNLOAD_CLIENT,
         )
         verdict = self.verdict_for(request)
         self.assertEqual(verdict.code, "UNMONITORED")
@@ -703,3 +691,97 @@ class SeasonPackCountingTests(RuleTestCase):
             )
         verdict = self.verdict_for(request)
         self.assertEqual(verdict.code, "BLOCKLIST_LOOP")
+
+
+class UsenetIsNotATorrent(RuleTestCase):
+    """A usenet download must never be judged by torrent rules.
+
+    Reported from a live setup: a SABnzbd download whose real problem was that SAB had
+    lost its news server connection was diagnosed as a dead torrent, and the suggested
+    fix was to blocklist the release. The rule was reading the raw payload with
+    qBittorrent's field names, so every SABnzbd row parsed as 0% with zero seeds.
+    Blocklisting on that advice destroys a good release and fixes nothing.
+    """
+
+    def _sab_sample(self, percentage="41", **overrides) -> dict:
+        # A real SABnzbd queue slot. It shares no field names with qBittorrent: progress
+        # is "percentage" (a string, 0-100), the title is "filename", and there is no
+        # state/num_seeds/dlspeed key at all.
+        slot = {
+            "status": "Downloading",
+            "nzo_id": "SABnzbd_nzo_abc123",
+            "filename": "Dune.Part.Two.2024.1080p.WEB-DL-GROUP",
+            "percentage": percentage,
+            "mb": "3120.53",
+            "mbleft": "1840.22",
+            "cat": "movies",
+            "timeleft": "0:12:30",
+        }
+        slot.update(overrides)
+        return slot
+
+    def test_stuck_usenet_download_blames_the_client_not_the_release(self):
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        add_event(request, EventType.GRABBED, hours_ago=30)
+        for hours in (24, 0.1):
+            add_download_sample(request, self._sab_sample(), usenet=True, hours_ago=hours)
+
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "DOWNLOADER_NOT_PROGRESSING")
+        # The whole point: it must not send the user to blocklist a fine release.
+        self.assertNotIn("blocklist the release", verdict.next_step.lower())
+        self.assertIn("news server", verdict.next_step.lower())
+        # And it must not invent a swarm that does not exist.
+        self.assertNotIn("seed", verdict.message.lower())
+
+    def test_progressing_usenet_download_says_nothing(self):
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        add_event(request, EventType.GRABBED, hours_ago=30)
+        add_download_sample(request, self._sab_sample("20"), usenet=True, hours_ago=24)
+        add_download_sample(request, self._sab_sample("74"), usenet=True, hours_ago=0.1)
+
+        verdict = self.verdict_for(request)
+        self.assertIsNone(verdict, f"healthy usenet download was diagnosed: {verdict}")
+
+    def test_missing_articles_is_the_one_case_that_should_blocklist(self):
+        """Low article health is unrecoverable, so here the torrent-style advice is right."""
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        add_event(request, EventType.GRABBED, hours_ago=30)
+        sample = add_download_sample(
+            request, self._sab_sample(), usenet=True, hours_ago=0.1
+        )
+        # SABnzbd reports article availability separately from the queue slot.
+        sample.facts = {**sample.facts, "health": 43.0, "unhealthy_articles": True}
+        sample.save(update_fields=["facts"])
+
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "GRABBED_BUT_STALLED")
+        self.assertIn("blocklist", verdict.next_step.lower())
+        self.assertIn("43%", verdict.message)
+
+    def test_completed_usenet_download_is_seen_as_complete(self):
+        """Rule 4 read raw progress fields too, so usenet never registered as finished."""
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        add_download_sample(
+            request,
+            self._sab_sample("100", mbleft="0.0"),
+            usenet=True,
+            hours_ago=0.2,
+        )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "DOWNLOADED_NOT_IMPORTED")
+
+    def test_rules_never_read_raw_download_payloads(self):
+        """Guards the root cause rather than this one symptom.
+
+        `raw` is whatever product happened to answer; only the client parser knows its
+        field names. Any rule reaching into it is reading zeros for some client.
+        """
+        import pathlib
+
+        offenders = []
+        for path in sorted(pathlib.Path("core/rules").glob("r*.py")):
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                if "DOWNLOAD_PROGRESS" in line and ".raw" in line:
+                    offenders.append(f"{path}:{lineno}")
+        self.assertEqual(offenders, [], f"rules reading raw download payloads: {offenders}")

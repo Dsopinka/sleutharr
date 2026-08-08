@@ -18,15 +18,12 @@ class DownloadedNotImported(Rule):
     def evaluate(self, ctx: RuleContext) -> Verdict | None:
         blocked = ctx.of_type(EventType.IMPORT_BLOCKED)
         latest_sample = ctx.latest(EventType.DOWNLOAD_PROGRESS)
-        torrent = ctx.torrent_state()
+        facts = ctx.download_facts()
 
-        client_complete = bool(
-            torrent
-            and (
-                float(torrent.get("progress") or 0) >= 1.0
-                or int(torrent.get("amount_left") or 1) == 0
-            )
-        )
+        # `is_complete` is computed by the client's own parser, so this holds for usenet
+        # as well as torrents. Reading raw progress fields here meant SABnzbd and NZBGet
+        # downloads never registered as finished at all.
+        client_complete = bool(facts and facts.get("is_complete"))
 
         if not blocked and not client_complete:
             return None
