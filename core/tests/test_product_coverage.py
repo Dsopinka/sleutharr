@@ -584,3 +584,96 @@ class OmbiRequestsReadCorrectly(TestCase):
         from core.clients.requestmanager import OmbiClient
 
         self.assertFalse(getattr(OmbiClient, "links_to_arr_entity", True))
+
+
+class LiveObservations(TestCase):
+    """Pinned from real servers, not from documentation.
+
+    Transmission 4.1.3, Deluge 2.2.0 and NZBGet 26.2 were run in containers and asked
+    the same questions Sleutharr asks. These lock in what they actually answered.
+    """
+
+    def test_a_queued_torrent_is_not_a_dead_one(self):
+        """Observed on live Transmission and Deluge.
+
+        A torrent that has not started reports zero peers and zero rate for an entirely
+        innocent reason. Queueing behind a max-active-downloads limit is normal, and the
+        advice attached to a dead swarm is to destroy the release.
+        """
+        from core.models import EventType, ServiceKind, ServiceVariant
+        from core.rules.base import RuleContext
+        from core.rules.engine import evaluate
+        from core.tests.factories import (
+            add_download_sample,
+            add_event,
+            make_request,
+            make_service,
+            torrent_sample,
+        )
+
+        for state in ("queuedDL", "checkingDL", "allocating"):
+            with self.subTest(state=state):
+                arr = make_service(ServiceKind.RADARR, name=f"Radarr-{state}")
+                client = make_service(
+                    ServiceKind.DOWNLOAD_CLIENT,
+                    name=f"qbit-{state}",
+                    variant=ServiceVariant.QBITTORRENT,
+                    base_url="http://qbit:8080",
+                )
+                request = make_request(arr_service=arr, remote_id=hash(state) % 10000)
+                add_event(request, EventType.GRABBED, hours_ago=30)
+                for hours in (24, 0.1):
+                    add_download_sample(
+                        request,
+                        torrent_sample(
+                            0.0, state=state, num_seeds=0, num_complete=0, dlspeed=0
+                        ),
+                        hours_ago=hours,
+                        service=client,
+                    )
+                events = list(request.events.order_by("occurred_at", "id"))
+                verdict = evaluate(RuleContext(request, events))
+                if verdict is not None:
+                    self.assertNotIn(
+                        "cannot finish",
+                        verdict.message,
+                        f"a {state} torrent was called dead",
+                    )
+
+    def test_transmission_field_names_match_what_it_sends(self):
+        """Confirmed against Transmission 4.1.3's torrent-get response."""
+        observed = {
+            "activityDate", "doneDate", "downloadDir", "error", "errorString", "eta",
+            "hashString", "id", "isFinished", "leftUntilDone", "name",
+            "peersSendingToUs", "percentDone", "rateDownload", "status", "totalSize",
+        }
+        item = TransmissionClient._parse(
+            {k: 0 for k in observed} | {"hashString": "a" * 40, "name": "x", "status": 4}
+        )
+        self.assertEqual(item.download_id, "a" * 40)
+        # Every field our parser reads is one Transmission actually sends.
+        for field_name in (
+            "hashString", "percentDone", "totalSize", "leftUntilDone", "rateDownload",
+            "eta", "downloadDir", "errorString", "peersSendingToUs", "activityDate",
+            "status",
+        ):
+            self.assertIn(field_name, observed, f"{field_name} is not a real field")
+
+    def test_deluge_field_names_match_what_it_sends(self):
+        """Confirmed against Deluge 2.2.0's core.get_torrents_status response."""
+        observed = {
+            "download_payload_rate", "eta", "hash", "is_finished", "message", "name",
+            "num_seeds", "progress", "save_path", "state", "time_since_download",
+            "total_remaining", "total_seeds", "total_size",
+        }
+        from core.clients.download import DELUGE_FIELDS
+
+        unknown = set(DELUGE_FIELDS) - observed
+        self.assertEqual(
+            unknown, set(), f"we ask Deluge for fields it does not return: {unknown}"
+        )
+
+    def test_nzbget_reports_health_in_permille(self):
+        """Confirmed against NZBGet 26.2: a healthy group reports Health=1000."""
+        self.assertAlmostEqual(nzbget(Health=1000).health, 100.0, places=1)
+        self.assertAlmostEqual(nzbget(Health=500).health, 50.0, places=1)

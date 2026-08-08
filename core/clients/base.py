@@ -112,6 +112,14 @@ class BaseClient:
         if self._client is not None:
             self._client.close()
             self._client = None
+        # Session cookies died with the client above, so anything remembering "I am
+        # logged in" must forget it too. Otherwise a reused client skips the login and
+        # every call fails with a bare "Not authenticated" that looks like bad
+        # credentials rather than a stale flag.
+        self._reset_session()
+
+    def _reset_session(self) -> None:
+        """Drop per-connection auth state. Overridden by clients that hold any."""
 
     @property
     def base_url(self) -> str:

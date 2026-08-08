@@ -5,10 +5,24 @@ against the upstream OpenAPI schema or the upstream entity source, not from memo
 Where the published documentation disagrees with the source, **the source wins** and the
 discrepancy is called out.
 
-No live instances were configured at build time, so nothing here is confirmed against a
-running server. Items marked **[UNVERIFIED-LIVE]** are the ones most worth re-checking
-once real credentials exist; `python manage.py probe_services` re-runs those checks and
-prints what it actually sees.
+Nothing here was confirmed against a running server at build time. Since then some
+products have been driven live, and the difference is worth tracking honestly, because
+"matches the docs" and "works" turned out to be different claims — see Finding 16, where
+a product that parsed perfectly against its documentation could not complete a single
+call.
+
+| Product | Live-verified against | Result |
+|---|---|---|
+| SABnzbd | a live instance (2026-08-06) | Finding 12 — usenet shares no field names with torrents |
+| Transmission | 4.1.3 (2026-08-08) | fields confirmed; queued torrents report zero peers |
+| Deluge | 2.2.0 (2026-08-08) | **was completely broken** — Finding 16 |
+| NZBGet | 26.2 (2026-08-08) | permille `Health` confirmed |
+| Seerr/Overseerr, Sonarr, Radarr, qBittorrent, Plex | schema/source only | not yet driven live |
+| Jellyfin, Emby, Ombi | schema/source only | not yet driven live |
+
+Items marked **[UNVERIFIED-LIVE]** are the ones most worth re-checking once real
+credentials exist; `python manage.py probe_services` re-runs those checks and prints what
+it actually sees.
 
 | Service | Source of truth | Version checked |
 |---|---|---|
@@ -710,6 +724,43 @@ and `has_no_seeds` returns False whenever the count is unknown.
 The same shape is fine for *sizes* and *rates*, where zero and absent mean much the same
 thing. It is only dangerous for fields whose zero value triggers a destructive
 recommendation. Those are: peer counts, swarm counts, and article health.
+
+## Finding 16 — Deluge's web UI is a proxy, and logging into it connects you to nothing
+
+Found against a live Deluge 2.2.0, and it is the reason Deluge support was **completely
+broken** rather than subtly wrong. Neither part of this is in any documentation we could
+find; both were established by calling the thing and reading what came back.
+
+**`auth.login` does not attach you to a daemon.** Deluge's web UI is a separate process
+that proxies JSON-RPC to `deluged`. Authenticating to the web UI succeeds on its own
+terms and leaves it connected to nothing. Every subsequent `core.*` and `daemon.*` call
+then returns:
+
+```json
+{"error": {"code": 2, "message": "Unknown method"}}
+```
+
+That message is the trap. It reads as *"you are calling a method that does not exist"* —
+so the obvious response is to go hunting for the right method name, which does not exist
+either, because the problem is not the name. The sequence is `auth.login` →
+`web.get_hosts` → `web.connect(host_id)` → `web.connected`, and only then does the
+`core.*` surface appear.
+
+It also fails *intermittently by deployment*, which is worse than failing always: a web
+UI a human has already clicked through stays connected to its daemon, so the missing step
+is invisible on a box someone has used and breaks every fresh install and every container
+restart.
+
+**`daemon.info` is a Deluge 1.x method and is gone in 2.x.** The 2.x spelling is
+`daemon.get_version`. Because a disconnected web UI answers *every* call with the same
+`Unknown method`, a version probe calling `daemon.info` cannot distinguish "wrong method
+for this major version" from "not connected to a daemon" — the two failures are
+byte-identical on the wire. We try `daemon.get_version` first and fall back to
+`daemon.info`, so a 1.x daemon still answers.
+
+The general lesson, since it will apply to the next JSON-RPC product: **`Unknown method`
+from a proxying API is not a statement about the method.** It is whatever the proxy says
+when it has nowhere to forward to.
 
 ## Coverage without a live instance
 

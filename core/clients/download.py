@@ -242,6 +242,9 @@ class QBittorrentClient(DownloadClient):
         super().__init__(service)
         self._authenticated = False
 
+    def _reset_session(self) -> None:
+        self._authenticated = False
+
     def default_headers(self) -> dict[str, str]:
         origin = self.origin()
         return {**super().default_headers(), "Referer": origin, "Origin": origin}
@@ -393,6 +396,9 @@ class TransmissionClient(DownloadClient):
         super().__init__(service)
         self._session_id = ""
 
+    def _reset_session(self) -> None:
+        self._session_id = ""
+
     def default_headers(self) -> dict[str, str]:
         headers = {**super().default_headers(), "Content-Type": "application/json"}
         if self._session_id:
@@ -537,6 +543,9 @@ class DelugeClient(DownloadClient):
         self._authenticated = False
         self._request_id = 0
 
+    def _reset_session(self) -> None:
+        self._authenticated = False
+
     def default_headers(self) -> dict[str, str]:
         return {**super().default_headers(), "Content-Type": "application/json"}
 
@@ -561,11 +570,53 @@ class DelugeClient(DownloadClient):
                 "on failure)."
             )
         self._authenticated = True
+        self._ensure_daemon()
+
+    def _ensure_daemon(self) -> None:
+        """Attach the web UI to a daemon before calling anything it proxies.
+
+        Verified against a live Deluge 2.2: the web UI is a *proxy*, and until it is
+        connected to a daemon every `core.*` and `daemon.*` call returns
+        `{"code": 2, "message": "Unknown method"}` -- not a connection error, which makes
+        it read like we are calling methods that do not exist.
+
+        Logging in is not connecting. A web UI someone has already used stays connected,
+        so this works without the step often enough to look correct, and fails on every
+        fresh install.
+        """
+        if self.rpc("web.connected") is True:
+            return
+
+        hosts = self.rpc("web.get_hosts") or []
+        if not hosts:
+            raise ServiceError(
+                "Deluge's web UI is not connected to a daemon and lists no hosts to "
+                "connect to. Open the Deluge web UI and connect it to its daemon."
+            )
+
+        # Rows are [id, host, port, username]; the id is all `web.connect` wants.
+        host_id = hosts[0][0] if isinstance(hosts[0], (list, tuple)) else hosts[0]
+        self.rpc("web.connect", [host_id])
+
+        if self.rpc("web.connected") is not True:
+            raise ServiceError(
+                "Deluge's web UI could not connect to its daemon. Check the daemon is "
+                "running and that the web UI's host entry points at it."
+            )
 
     def probe(self) -> ProbeResult:
         self.login()
-        version = self.rpc("daemon.info") or ""
-        return ProbeResult(ok=True, detail=f"Deluge {version}".strip(), version=str(version))
+        # `daemon.get_version` on Deluge 2.x. `daemon.info` is the 1.x spelling and is
+        # not merely deprecated on 2.x -- it is absent, and answers "Unknown method".
+        version = ""
+        for method in ("daemon.get_version", "daemon.info"):
+            try:
+                version = str(self.rpc(method) or "")
+            except ServiceError:
+                continue
+            if version:
+                break
+        return ProbeResult(ok=True, detail=f"Deluge {version}".strip(), version=version)
 
     def items_by_id(self, download_ids: list[str]) -> dict[str, DownloadItem]:
         wanted = sorted({self._key(h) for h in download_ids if h})

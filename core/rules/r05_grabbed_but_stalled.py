@@ -136,7 +136,14 @@ class GrabbedButStalled(Rule):
 
         # Torrents only. `has_no_seeds` is computed by the client parser, which knows
         # the difference between "the tracker said zero" and "the tracker said nothing".
-        if not is_usenet and facts.get("has_no_seeds"):
+        #
+        # It only *means* anything while the torrent is actually trying to download.
+        # Observed on live Transmission and Deluge: a queued or checking torrent reports
+        # zero peers and zero rate for the entirely innocent reason that it has not
+        # started yet. Queueing behind a max-active-downloads limit is completely normal,
+        # and "it cannot finish, blocklist it" is a terrible thing to say about it.
+        actively_trying = state in {"downloading", "stalled", "metadata"}
+        if not is_usenet and actively_trying and facts.get("has_no_seeds"):
             num_complete = int(facts.get("num_complete", -1) or -1)
             swarm = (
                 f"{num_complete} seeds in the swarm"

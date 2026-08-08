@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-VERSION = "2.10.0"
+VERSION = "2.10.1"
 
 
 def app_context(request) -> dict:
