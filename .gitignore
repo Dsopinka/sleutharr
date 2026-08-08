@@ -13,3 +13,6 @@ __pycache__/
 .vscode/
 .idea/
 *.code-workspace
+
+# Vercel CLI project link (contains project/org ids).
+.vercel/

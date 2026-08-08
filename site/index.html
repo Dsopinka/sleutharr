@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sleutharr — I requested this, where did it die?</title>
+<meta name="description" content="Traces a stuck media request across Seerr, Sonarr/Radarr, your downloader and Plex, and tells you where it broke and what to do about it.">
+
+<link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
+<link rel="alternate icon" href="/assets/icon.png">
+<link rel="stylesheet" href="/style.css">
+
+<meta property="og:title" content="Sleutharr">
+<meta property="og:description" content="Traces a stuck media request across Seerr, Sonarr/Radarr, your downloader and Plex, and tells you where it broke.">
+<meta property="og:image" content="https://sleutharr.com/assets/dashboard.png">
+<meta property="og:url" content="https://sleutharr.com">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="/">
+    <img src="/assets/icon.svg" alt="" width="26" height="26">
+    <span>Sleutharr</span>
+  </a>
+  <nav>
+    <a href="#install">Install</a>
+    <a href="#what">What it finds</a>
+    <a href="https://github.com/Dsopinka/sleutharr">GitHub</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="hero">
+  <p class="eyebrow">Self-hosted &middot; free &middot; MIT</p>
+  <h1>“I requested this.<br>Where did it die?”</h1>
+  <p class="lede">
+    Your request went into Seerr and never came out. The answer is somewhere across five
+    web UIs, and the symptom almost never matches the cause. Sleutharr follows that one
+    request the whole way and tells you exactly where it broke.
+  </p>
+  <div class="cta">
+    <a class="btn primary" href="#install">Install it</a>
+    <a class="btn" href="https://github.com/Dsopinka/sleutharr">Source on GitHub</a>
+  </div>
+  <p class="micro">Reads from your services. Changes nothing unless you click a button and confirm.</p>
+</section>
+
+<section class="shot">
+  <img src="/assets/dashboard.png" alt="The Sleutharr dashboard listing stuck requests, each with a plain-English verdict and a suggested next step." loading="lazy">
+</section>
+
+<section class="band">
+  <h2>The symptom is never the cause</h2>
+  <div class="cards">
+    <div class="card">
+      <div class="says">Sonarr says<br><strong>“no results found”</strong></div>
+      <div class="arrow">because</div>
+      <div class="cause">the series was never set to monitored, so it has never once searched.</div>
+    </div>
+    <div class="card">
+      <div class="says">Your downloader says<br><strong>“100% complete”</strong></div>
+      <div class="arrow">because</div>
+      <div class="cause">the import failed on a hardlink error the *arr logged and nothing surfaced.</div>
+    </div>
+    <div class="card">
+      <div class="says">Radarr says<br><strong>“imported”</strong></div>
+      <div class="arrow">because</div>
+      <div class="cause">Plex mounts that folder at a different path and never saw the file.</div>
+    </div>
+  </div>
+  <p class="note">
+    Each of those takes twenty minutes of clicking between apps to work out. Sleutharr
+    gives you one sentence.
+  </p>
+</section>
+
+<section id="what" class="band alt">
+  <h2>One verdict, with the evidence</h2>
+  <p class="wide">
+    Every request gets a single answer in plain English, the timeline it was derived from,
+    and a link straight to the app that owns the fix. Not a dashboard of graphs — a
+    conclusion.
+  </p>
+
+  <div class="verdicts">
+    <div class="v"><span class="vt err">Never reached your library</span><span class="vd">The hand-off from your request manager to Sonarr/Radarr silently failed.</span></div>
+    <div class="v"><span class="vt warn">Not being watched for</span><span class="vd">It exists, but monitoring is off, so nothing will ever download.</span></div>
+    <div class="v"><span class="vt warn">Download is stuck</span><span class="vd">In your client with no seeds, or no progress for hours.</span></div>
+    <div class="v"><span class="vt err">Downloaded, but could not be filed away</span><span class="vd">Finished, but the import is blocked. Quotes the actual error.</span></div>
+    <div class="v"><span class="vt warn">Folder paths do not line up</span><span class="vd">It is in Plex, at a path your *arr does not use. One click fixes it.</span></div>
+    <div class="v"><span class="vt info">Lower quality than you asked for</span><span class="vd">Playable, so nothing flagged it — but it is below your cutoff.</span></div>
+    <div class="v"><span class="vt info">Not out yet</span><span class="vd">Nothing is wrong. It simply has not been released.</span></div>
+  </div>
+
+  <div class="shot inset">
+    <img src="/assets/request-detail.png" alt="A single request showing its verdict, the recommended action, and a timeline of every event across all services." loading="lazy">
+  </div>
+</section>
+
+<section class="band">
+  <h2>It sets itself up</h2>
+  <p class="wide">
+    Add your request manager and press <strong>Find my other services</strong>. It reads
+    your Sonarr and Radarr instances out of it — addresses, API keys, and the two settings
+    nobody can guess — then reads your download clients out of those. For Plex you sign in
+    with your Plex account and pick a server; there is no token to hunt down.
+  </p>
+
+  <div class="grid">
+    <div><h3>Request managers</h3><p>Seerr, Overseerr, Jellyseerr, Ombi</p></div>
+    <div><h3>Libraries</h3><p>Sonarr, Radarr — any number, including 4K splits</p></div>
+    <div><h3>Download clients</h3><p>qBittorrent, Transmission, Deluge, SABnzbd, NZBGet</p></div>
+    <div><h3>Media servers</h3><p>Plex, Jellyfin, Emby</p></div>
+  </div>
+</section>
+
+<section class="band alt">
+  <h2>And it can fix some of it</h2>
+  <p class="wide">
+    Where there is a single obvious fix, there is a button for it — removing a stuck
+    download and blocklisting the release, retrying a failed hand-off, adding the folder
+    mapping it worked out, or asking your indexers why nothing is being grabbed and
+    showing the exact reason each release was rejected.
+  </p>
+  <div class="safety">
+    <strong>Nothing runs on its own.</strong>
+    Every action needs a click and a confirmation that spells out what will happen. There
+    is deliberately no auto-remediation: these verdicts are heuristics over five services
+    that disagree with each other, they will occasionally be wrong, and a wrong verdict
+    wired to a delete key costs you the download. A wrong badge costs you ten seconds.
+  </div>
+</section>
+
+<section id="install" class="band">
+  <h2>Install</h2>
+
+  <div class="install">
+    <div class="col">
+      <h3>Unraid</h3>
+      <p><strong>Docker → Add Container</strong>, then:</p>
+      <table>
+        <tr><td>Repository</td><td><code>dsopinka123/sleutharr:latest</code></td></tr>
+        <tr><td>Port</td><td><code>8080</code> → <code>8080</code></td></tr>
+        <tr><td>Path</td><td><code>/config</code> → <code>/mnt/user/appdata/sleutharr</code></td></tr>
+        <tr><td>Variables</td><td><code>PUID=99</code>, <code>PGID=100</code>, <code>TZ</code></td></tr>
+      </table>
+      <p><a href="https://github.com/Dsopinka/sleutharr/blob/main/docs/install-guide.md">Full step-by-step guide →</a></p>
+    </div>
+
+    <div class="col">
+      <h3>Docker</h3>
+      <pre><code>docker run -d --name sleutharr \
+  -p 8080:8080 \
+  -e PUID=1000 -e PGID=1000 \
+  -e TZ=Etc/UTC \
+  -v ./config:/config \
+  dsopinka123/sleutharr:latest</code></pre>
+      <p class="micro">
+        Also on GHCR as <code>ghcr.io/dsopinka/sleutharr</code>. Then open
+        <code>http://your-server:8080</code>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="band alt honest">
+  <h2>Worth knowing before you install</h2>
+  <p class="wide">
+    This is early software. It works, it has a test suite, and it runs against real
+    setups — but it has been used by a small number of people, so it will meet
+    combinations it has not seen. Ombi, Jellyfin, Emby, NZBGet, Transmission and Deluge
+    are built to their documented APIs but have not yet been pointed at a live instance.
+  </p>
+  <p class="wide">
+    If a verdict looks wrong, that <em>is</em> the useful bug report — nearly every bug
+    found so far was exactly that. It never touches your media files, and it never
+    changes anything in Sonarr, Radarr or Plex without you confirming it.
+  </p>
+  <div class="cta">
+    <a class="btn" href="https://github.com/Dsopinka/sleutharr/issues">Report something →</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="foot">
+    <div>
+      <img src="/assets/icon.svg" alt="" width="22" height="22">
+      <span>Sleutharr</span>
+    </div>
+    <nav>
+      <a href="https://github.com/Dsopinka/sleutharr">GitHub</a>
+      <a href="https://hub.docker.com/r/dsopinka123/sleutharr">Docker Hub</a>
+      <a href="https://github.com/Dsopinka/sleutharr/blob/main/docs/install-guide.md">Docs</a>
+      <a class="coffee" href="https://buymeacoffee.com/dsopinka">☕ Buy me a coffee</a>
+    </nav>
+  </div>
+  <p class="micro center">Free and MIT licensed. Not affiliated with Plex, Sonarr, Radarr, Seerr or Unraid.</p>
+</footer>
+
+</body>
+</html>

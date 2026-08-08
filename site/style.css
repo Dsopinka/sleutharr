@@ -1,0 +1,320 @@
+/* Same palette as the app itself -- someone arriving here and then installing it should
+   feel like they are looking at one thing, not a marketing site bolted onto a tool. */
+
+:root {
+  --bg: #0f1114;
+  --bg-raised: #16191f;
+  --bg-alt: #131619;
+  --border: #262b34;
+  --border-soft: #1f232a;
+  --text: #e6e9ee;
+  --text-dim: #99a1af;
+  --text-faint: #6c7480;
+  --accent: #5aa9e6;
+  --accent-bright: #8ecbff;
+  --accent-dim: #2f6d99;
+  --ok: #56b98a;
+  --warn: #e0a340;
+  --err: #e4685d;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --wrap: 1080px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-bright); }
+
+h1, h2, h3 { line-height: 1.2; margin: 0; }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: #0b0d10;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--accent-bright);
+}
+
+/* ------------------------------------------------------------------- nav */
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 20px 24px;
+  flex-wrap: wrap;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 650;
+  font-size: 17px;
+  letter-spacing: .2px;
+}
+.brand:hover { color: var(--text); }
+.nav nav { display: flex; gap: 22px; font-size: 14.5px; }
+.nav nav a { color: var(--text-dim); }
+.nav nav a:hover { color: var(--text); }
+
+/* ------------------------------------------------------------------ hero */
+
+.hero {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 64px 24px 40px;
+  text-align: center;
+}
+.eyebrow {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  margin: 0 0 20px;
+}
+.hero h1 {
+  font-size: clamp(34px, 6vw, 60px);
+  font-weight: 680;
+  letter-spacing: -1.4px;
+  margin-bottom: 22px;
+}
+.lede {
+  max-width: 660px;
+  margin: 0 auto;
+  color: var(--text-dim);
+  font-size: clamp(16px, 2vw, 18.5px);
+}
+.cta {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 32px 0 16px;
+}
+.btn {
+  display: inline-block;
+  padding: 11px 22px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 550;
+}
+.btn:hover { border-color: var(--accent-dim); color: var(--text); }
+.btn.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: #fff;
+}
+.btn.primary:hover { background: #377dad; color: #fff; }
+
+.micro { color: var(--text-faint); font-size: 13px; }
+.micro.center { text-align: center; }
+
+/* --------------------------------------------------------------- screens */
+
+.shot {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px 72px;
+}
+.shot img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  /* Lifts the screenshot off the page without a hard drop shadow, which reads as
+     dated on a dark background. */
+  box-shadow: 0 24px 70px -30px rgba(0, 0, 0, 0.9),
+              0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+.shot.inset { padding-bottom: 0; margin-top: 40px; }
+
+/* ----------------------------------------------------------------- bands */
+
+.band {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 72px 24px;
+}
+.band.alt {
+  max-width: none;
+  background: var(--bg-alt);
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+}
+.band.alt > * { max-width: var(--wrap); margin-left: auto; margin-right: auto; }
+
+.band h2 {
+  font-size: clamp(24px, 3.4vw, 33px);
+  font-weight: 660;
+  letter-spacing: -0.6px;
+  margin-bottom: 18px;
+}
+.wide { max-width: 680px; color: var(--text-dim); font-size: 16.5px; }
+.note { color: var(--text-faint); font-size: 14.5px; margin-top: 28px; max-width: 620px; }
+
+/* ------------------------------------------------------------ cause cards */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-top: 34px;
+}
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px;
+}
+.says { color: var(--text-dim); font-size: 14.5px; line-height: 1.5; }
+.says strong { color: var(--text); font-size: 16px; }
+.arrow {
+  color: var(--err);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin: 14px 0 10px;
+}
+.cause { color: var(--text); font-size: 15px; }
+
+/* -------------------------------------------------------------- verdicts */
+
+.verdicts { margin-top: 34px; display: grid; gap: 1px; background: var(--border-soft); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.v {
+  display: grid;
+  grid-template-columns: minmax(210px, 34%) 1fr;
+  gap: 18px;
+  padding: 15px 20px;
+  background: var(--bg-raised);
+  align-items: baseline;
+}
+.vt { font-weight: 600; font-size: 15px; }
+.vt.err { color: var(--err); }
+.vt.warn { color: var(--warn); }
+.vt.info { color: var(--accent); }
+.vd { color: var(--text-dim); font-size: 14.5px; }
+
+/* ------------------------------------------------------------ supported */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin-top: 34px;
+}
+.grid h3 {
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+.grid p { margin: 0; font-size: 15.5px; }
+
+/* ---------------------------------------------------------------- safety */
+
+.safety {
+  margin-top: 30px;
+  padding: 20px 22px;
+  background: #12181c;
+  border: 1px solid #23414d;
+  border-left: 3px solid var(--ok);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 15px;
+  max-width: 760px;
+}
+.safety strong { color: var(--text); }
+
+/* --------------------------------------------------------------- install */
+
+.install {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 28px;
+  margin-top: 30px;
+}
+.col h3 { font-size: 18px; margin-bottom: 14px; }
+.col p { color: var(--text-dim); font-size: 15px; }
+.col table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+.col td { padding: 8px 0; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.col td:first-child { color: var(--text-faint); width: 34%; padding-right: 12px; }
+
+pre {
+  background: #0b0d10;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 16px 18px;
+  overflow-x: auto;
+  margin: 0 0 14px;
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.honest .wide + .wide { margin-top: 16px; }
+.honest .cta { justify-content: flex-start; margin-bottom: 0; }
+
+/* ---------------------------------------------------------------- footer */
+
+footer {
+  border-top: 1px solid var(--border-soft);
+  padding: 40px 24px 56px;
+}
+.foot {
+  max-width: var(--wrap);
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.foot > div { display: flex; align-items: center; gap: 9px; color: var(--text); font-weight: 600; }
+.foot nav { display: flex; gap: 22px; flex-wrap: wrap; font-size: 14.5px; }
+.foot nav a { color: var(--text-dim); }
+.foot nav a:hover { color: var(--text); }
+.foot .coffee:hover { color: #ffdd00; }
+
+/* ----------------------------------------------------------------- small */
+
+@media (max-width: 640px) {
+  .hero { padding-top: 40px; }
+  .band { padding: 52px 20px; }
+  .v { grid-template-columns: 1fr; gap: 4px; }
+  .nav { padding: 16px 20px; }
+  .nav nav { gap: 16px; font-size: 14px; }
+}
+
+/* Someone reading this in a light-themed browser still gets the dark design, which is
+   deliberate -- the app is dark, and a light landing page would misrepresent it. The
+   only concession is respecting reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
