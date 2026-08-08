@@ -485,6 +485,45 @@ class DeletionReconcileTests(TestCase):
 
         self.assertEqual(TrackedRequest.objects.count(), 3)
 
+    def test_deletions_are_noticed_even_with_history_past_the_cutoff(self):
+        """Reported from a live instance: a request removed in Seerr stayed for months.
+
+        The walk runs newest-first and stops at the backfill cutoff, which is correct --
+        older requests are out of scope. But stopping there was treated as an incomplete
+        walk, and only a complete one is trusted to notice an absence. So the moment a
+        user had a single request older than `backfill_days`, every walk ended at the
+        cutoff, and reconciliation never ran again for as long as that request existed.
+
+        Reaching the cutoff *is* a complete walk of the window that matters: everything
+        newer has been seen, and everything newer is exactly what `_remove_deleted`
+        judges. Only the "25 untouched records, we have caught up" stop is a genuine
+        early exit, and that one is already skipped while reconciling.
+        """
+        from django.utils import timezone as tz
+
+        ancient = {
+            **self.payload["results"][0],
+            "id": 900,
+            "createdAt": (tz.now() - tz.timedelta(days=400)).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        }
+        with_history = [*self.payload["results"], ancient]
+
+        self._sync(with_history)
+        self.assertEqual(TrackedRequest.objects.count(), 3, "the old one is out of scope")
+
+        # The user deletes 102 upstream.
+        remaining = [r for r in with_history if r["id"] != 102]
+        self._sync(remaining, force_reconcile=True)
+
+        ids = set(TrackedRequest.objects.values_list("remote_id", flat=True))
+        self.assertEqual(
+            ids,
+            {101, 103},
+            "a request deleted upstream survived because older history stopped the walk",
+        )
+
     def test_a_walk_that_saw_nothing_at_all_never_deletes(self):
         """The last line of defence, and deliberately product-agnostic.
 

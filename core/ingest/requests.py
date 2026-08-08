@@ -74,10 +74,20 @@ def sync_service_requests(service: ServiceInstance, force_reconcile: bool = Fals
         with client:
             for parsed in client.iter_requests(newest_first=True):
                 # Backfill boundary. Requests older than the cutoff are out of scope.
-                if parsed.requested_at < cutoff and cursor.backfill_complete:
-                    break
+                #
+                # Reaching it counts as having walked everything, and that distinction
+                # is the whole of a bug reported from a live instance: a request deleted
+                # in Seerr sat on the dashboard for months. Only a complete walk is
+                # trusted to notice an absence, and stopping here did not count as one --
+                # so a single request older than `backfill_days` ended every walk at the
+                # cutoff and switched reconciliation off for as long as it existed.
+                #
+                # It is a complete walk of the window that matters. Everything newer has
+                # been seen, and everything newer is exactly what `_remove_deleted`
+                # judges: it only ever considers `requested_at >= cutoff`.
                 if parsed.requested_at < cutoff:
                     cursor.backfill_complete = True
+                    walked_everything = True
                     break
 
                 seen_ids.add(parsed.remote_id)
