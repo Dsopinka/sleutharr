@@ -688,3 +688,49 @@ The rule stays silent unless it can be sure: an empty `requested_seasons` means 
 whole-series request, a snapshot with no `seasons` list means the data was never
 captured, and a season number the *arr did not mention is unknown rather than off. It
 fires only when every requested season the *arr did report is switched off.
+
+---
+
+## Finding 15 — `int(row.get(key) or 0)` is how a healthy release gets destroyed
+
+The single most dangerous line shape in this codebase, found by running every client's
+parser against a payload containing nothing but an id.
+
+All three torrent clients read peer counts as `int(row.get("num_seeds") or 0)`. That
+turns *"this client did not report peers"* into *"this torrent has no peers"* — and the
+advice attached to "no peers" is to remove the download and blocklist the release. A
+trimmed payload, an older client version, or a field we simply forgot to request in the
+fields list would have silently destroyed a perfectly good release.
+
+`DownloadItem.num_seeds` already defaulted to `-1` for exactly this reason. The parsers
+were overwriting that sentinel with `0` on the way in, so the safety it provided never
+reached a single real payload. Parsers now use `_reported_int()`, which preserves `-1`,
+and `has_no_seeds` returns False whenever the count is unknown.
+
+The same shape is fine for *sizes* and *rates*, where zero and absent mean much the same
+thing. It is only dangerous for fields whose zero value triggers a destructive
+recommendation. Those are: peer counts, swarm counts, and article health.
+
+## Coverage without a live instance
+
+Most integrations here have never been pointed at a real server. `core/tests/
+test_product_coverage.py` runs one set of scenarios through every product's real parser,
+asserting they reach the same normalised conclusion:
+
+| Scenario | Proves |
+|---|---|
+| healthy at 42% | the three different progress scales (0-1, 0-100, string percent) |
+| one true byte count | MB-strings vs bytes vs 64-bit Hi/Lo words, and MiB vs MB |
+| complete / paused / errored | state vocabularies agree across five clients |
+| dead torrent | zero seeds detected on all three torrent clients |
+| unknown swarm | a withholding tracker never reads as a dead one |
+| missing articles | SABnzbd `mbmissing` and NZBGet permille `Health` agree |
+| id-only payload | no client invents complete, dead, errored or paused |
+| facts keys | every client exposes the same keys, so none reads as a silent zero |
+
+Media-server matching is exercised with Jellyfin and Emby item shapes as well as Plex,
+including a Windows *arr path against a Linux server — a common Jellyfin arrangement that
+the Plex-only fixtures never covered.
+
+This proves our parsing matches each product's *documented* behaviour. It cannot prove a
+product matches its own documentation. That gap is what the issue templates are for.

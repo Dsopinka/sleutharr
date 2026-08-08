@@ -84,6 +84,11 @@ class DownloadItem:
         """
         if self.is_usenet:
             return False
+        if self.num_seeds < 0:
+            # The client did not report a peer count at all -- a trimmed payload, an
+            # older version, or a field we failed to ask for. Unknown is not zero, and
+            # the advice attached to "zero" is to destroy the release.
+            return False
         if self.num_complete < 0:
             return self.num_seeds == 0 and self.download_rate == 0
         return self.num_complete == 0 and self.num_seeds == 0
@@ -116,6 +121,22 @@ class DownloadItem:
             "left": self.left,
             "error_message": self.error_message,
         }
+
+
+def _reported_int(row: dict, key: str) -> int:
+    """An integer the client actually sent, or -1 meaning it said nothing.
+
+    `int(row.get(key) or 0)` is the tempting form and it is wrong: it turns "this client
+    did not report peers" into "this torrent has no peers", which is the difference
+    between staying quiet and telling someone to blocklist a healthy release.
+    """
+    value = row.get(key)
+    if value is None:
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
 
 
 @dataclass
@@ -316,8 +337,8 @@ class QBittorrentClient(DownloadClient):
             save_path=str(row.get("save_path") or ""),
             content_path=str(row.get("content_path") or ""),
             category=str(row.get("category") or ""),
-            num_seeds=int(num("num_seeds")),
-            num_complete=int(num("num_complete", -1)),
+            num_seeds=_reported_int(row, "num_seeds"),
+            num_complete=_reported_int(row, "num_complete"),
             last_activity=int(num("last_activity")),
             raw=row,
         )
@@ -439,11 +460,12 @@ class TransmissionClient(DownloadClient):
     @classmethod
     def _parse(cls, row: dict) -> DownloadItem:
         status = TRANSMISSION_STATUS.get(int(row.get("status") or 0), "unknown")
-        peers = int(row.get("peersSendingToUs") or 0)
+        peers = _reported_int(row, "peersSendingToUs")
         rate = int(row.get("rateDownload") or 0)
         progress = float(row.get("percentDone") or 0)
 
         # Transmission has no "stalled" status; it is downloading with nobody to talk to.
+        # Only conclude that when the peer count was actually reported.
         if status == "downloading" and peers == 0 and rate == 0 and progress < 1.0:
             status = "stalled"
 
@@ -575,7 +597,7 @@ class DelugeClient(DownloadClient):
         raw_state = str(row.get("state") or "unknown")
         state = DELUGE_STATE_MAP.get(raw_state, raw_state.lower())
         rate = int(row.get("download_payload_rate") or 0)
-        seeds = int(row.get("num_seeds") or 0)
+        seeds = _reported_int(row, "num_seeds")
 
         # Deluge reports progress as 0-100, unlike qBittorrent's 0-1. Treating it as a
         # fraction would make every torrent look 100x complete and permanently finished.
@@ -598,7 +620,7 @@ class DelugeClient(DownloadClient):
             if raw_state == "Error"
             else "",
             num_seeds=seeds,
-            num_complete=int(row.get("total_seeds") or -1),
+            num_complete=_reported_int(row, "total_seeds"),
             raw=row,
         )
 
@@ -740,6 +762,16 @@ class SabnzbdClient(DownloadClient):
             "fetching": "metadata",
         }.get(status, status or "unknown")
 
+        # SABnzbd has no single "health" percentage the way NZBGet does. Its equivalent
+        # is `mbmissing`: megabytes the provider could not supply. Expressed against the
+        # total it gives the same 0-100 article-availability figure, which is what tells
+        # a genuinely unrecoverable release apart from a merely slow one.
+        missing_mb = mb("mbmissing")
+        if total_mb > 0 and missing_mb > 0:
+            health = max(0.0, 100.0 * (1.0 - missing_mb / total_mb))
+        else:
+            health = -1.0  # nothing missing, or nothing to measure against
+
         return DownloadItem(
             download_id=cls._key(slot.get("nzo_id")),
             name=str(slot.get("filename") or ""),
@@ -748,6 +780,7 @@ class SabnzbdClient(DownloadClient):
             size=int(total_mb * 1024 * 1024),
             left=int(left_mb * 1024 * 1024),
             category=str(slot.get("cat") or ""),
+            health=health,
             is_usenet=True,
             raw=slot,
         )
