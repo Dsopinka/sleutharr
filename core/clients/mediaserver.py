@@ -278,14 +278,35 @@ class JellyfinClient(MediaServerClient):
         rows = (data or {}).get("Items") or []
         return self._parse_item(rows[0]) if rows else None
 
-    def iter_items(self, page_size: int = 500) -> Iterator[MediaItem]:
+    def series_provider_ids(self) -> dict[str, tuple[int | None, int | None]]:
+        """Map each series' item id to the series' own tmdb/tvdb ids.
+
+        Needed because an episode's `ProviderIds` are the *episode's* ids, in a numbering
+        space of their own -- see `_parse_item`. The series is the only place the id a
+        request actually carries can be read from.
+        """
+        out: dict[str, tuple[int | None, int | None]] = {}
+        for row in self._walk("Series"):
+            item = self._parse_item(row)
+            if item.item_id:
+                out[item.item_id] = (item.tmdb_id, item.tvdb_id)
+        return out
+
+    def _walk(self, item_types: str, page_size: int = 500) -> Iterator[dict]:
+        """Page through /Items, refusing to stop quietly on a response we cannot read.
+
+        A silent `return` here would hand back a short library and no indication that it
+        was short -- and a short library is read downstream as files the server does not
+        have, which is a diagnosis about the user's setup rather than about our own
+        failure to finish reading.
+        """
         start = 0
         while True:
             data = self.get_json(
                 "/Items",
                 params={
                     "recursive": "true",
-                    "includeItemTypes": self.item_types,
+                    "includeItemTypes": item_types,
                     "fields": "Path,ProviderIds",
                     "startIndex": start,
                     "limit": page_size,
@@ -294,20 +315,33 @@ class JellyfinClient(MediaServerClient):
                 },
             )
             if not isinstance(data, dict):
-                return
+                raise ServiceError(
+                    f"{self.product} returned {type(data).__name__} rather than an "
+                    f"object for /Items at offset {start}. Treating that as an empty "
+                    "library would report every file as missing."
+                )
             rows = data.get("Items") or []
             if not rows:
                 return
             for row in rows:
                 if isinstance(row, dict):
-                    yield self._parse_item(row)
+                    yield row
             total = data.get("TotalRecordCount")
             start += len(rows)
             if total is None or start >= int(total) or len(rows) < page_size:
                 return
 
+    def iter_items(self, page_size: int = 500) -> Iterator[MediaItem]:
+        # Fetched up front rather than per episode: it is one call for the whole library,
+        # and an episode alone cannot say what series id it belongs to in tvdb terms.
+        series_ids = self.series_provider_ids()
+        for row in self._walk(self.item_types, page_size):
+            yield self._parse_item(row, series_ids)
+
     @staticmethod
-    def _parse_item(row: dict) -> MediaItem:
+    def _parse_item(
+        row: dict, series_ids: dict[str, tuple[int | None, int | None]] | None = None
+    ) -> MediaItem:
         # Unlike Plex, the path is a flat string on the item itself.
         paths = [str(row["Path"])] if row.get("Path") else []
         for source in row.get("MediaSources") or []:
@@ -327,13 +361,31 @@ class JellyfinClient(MediaServerClient):
             except (TypeError, ValueError):
                 return None
 
+        item_type = str(row.get("Type") or "")
+        tmdb_id, tvdb_id = as_int("tmdb"), as_int("tvdb")
+
+        if item_type == "Episode":
+            # Confirmed against a live Jellyfin 10.11.11: an episode's ProviderIds are
+            # the *episode's* ids. "From Pole to Pole" reports Tvdb=306329 while Planet
+            # Earth, the series, reports Tvdb=79257 -- and a request only ever carries
+            # the series id, because that is what Seerr stores and what Sonarr looks
+            # series up by.
+            #
+            # Comparing the two is not merely a join that fails to match. Both are bare
+            # integers drawn from overlapping ranges, so a request for one show can match
+            # an episode of a completely different one, and be reported as present in the
+            # library. An episode therefore takes its series' ids or none at all.
+            tmdb_id, tvdb_id = (series_ids or {}).get(
+                str(row.get("SeriesId") or ""), (None, None)
+            )
+
         return MediaItem(
             item_id=str(row.get("Id") or ""),
             title=str(row.get("Name") or ""),
-            item_type=str(row.get("Type") or ""),
+            item_type=item_type,
             paths=paths,
-            tmdb_id=as_int("tmdb"),
-            tvdb_id=as_int("tvdb"),
+            tmdb_id=tmdb_id,
+            tvdb_id=tvdb_id,
             raw=row,
         )
 

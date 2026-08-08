@@ -17,8 +17,16 @@ call.
 | Transmission | 4.1.3 (2026-08-08) | fields confirmed; queued torrents report zero peers |
 | Deluge | 2.2.0 (2026-08-08) | **was completely broken** — Finding 16 |
 | NZBGet | 26.2 (2026-08-08) | permille `Health` confirmed |
+| Jellyfin | 10.11.11 (2026-08-08) | **TV id join was broken** — Findings 17, 19 |
+| Emby | 4.9.5.0 (2026-08-08) | probe, paths and pagination confirmed; see caveat below |
+| Ombi | v4 (2026-08-08) | **could delete every tracked request** — Finding 18 |
 | Seerr/Overseerr, Sonarr, Radarr, qBittorrent, Plex | schema/source only | not yet driven live |
-| Jellyfin, Emby, Ombi | schema/source only | not yet driven live |
+
+Emby's caveat, stated plainly because "verified" should mean one thing: its probe,
+`/Items` pagination, flat `Path` and `SeriesId` were all confirmed against the running
+server, but the instance never populated `ProviderIds` (it fetched no metadata), so the
+id join itself is confirmed on Jellyfin only. Emby is known to expose the same `SeriesId`
+the fix depends on; it is not known to return the same provider ids for it.
 
 Items marked **[UNVERIFIED-LIVE]** are the ones most worth re-checking once real
 credentials exist; `python manage.py probe_services` re-runs those checks and prints what
@@ -761,6 +769,101 @@ byte-identical on the wire. We try `daemon.get_version` first and fall back to
 The general lesson, since it will apply to the next JSON-RPC product: **`Unknown method`
 from a proxying API is not a statement about the method.** It is whatever the proxy says
 when it has nowhere to forward to.
+
+## Finding 17 — a Jellyfin/Emby episode's `ProviderIds` are the *episode's* ids
+
+Confirmed against a live Jellyfin 10.11.11 with a fully matched episode. Finding 7 above
+claims the ProviderIds join is "arguably more reliable" than Plex's ratingKey. For
+television that was simply wrong, and wrong in the direction that invents verdicts.
+
+One scanned episode of Planet Earth, and its series, side by side on the wire:
+
+| Item | `Type` | `ProviderIds` |
+|---|---|---|
+| Planet Earth | `Series` | `{"Imdb": "tt0795176", "Tmdb": "1044", "Tvdb": "79257"}` |
+| From Pole to Pole | `Episode` | `{"Imdb": "tt0797603", "TvRage": "330114", "Tvdb": "306329"}` |
+
+**`79257` is the series. `306329` is the episode. Both are called `Tvdb`.** Every id that
+reaches this join is a series id — Seerr stores the series `tvdbId`, and Sonarr looks
+series up by it — so reading the episode's own id compares two different numbering
+spaces that share a field name and a type.
+
+The first consequence is that the join silently never matches, which quietly disabled
+the `PATH_MISMATCH` diagnosis for all television. The second is worse: both are bare
+integers over overlapping ranges, so a request for one show can match an episode of an
+unrelated one and be reported as present in the library. Verified both ways against the
+live server — the real series id found nothing, and an episode id found a show that had
+nothing to do with it.
+
+An episode therefore takes its **series'** ids or none at all. `SeriesId` is present on
+every episode row (Emby 4.9.5.0 included, where it is a small integer rather than a
+GUID), so one extra `IncludeItemTypes=Series` pass resolves it for the whole library.
+
+### The related claim the id join is not entitled to make
+
+Since every id in this chain is a series id — Plex's stored rating key for a show as much
+as Jellyfin's ProviderIds — an id match can only ever prove *the series is in the
+library*. It cannot prove the episode is.
+
+That matters because the mismatch diagnosis says "the server has this exact file under
+another path, so your mapping is wrong". For a series-level hit that is equally
+consistent with the new episode not being scanned yet, and the advice — change a path
+mapping that is working — breaks a correct configuration.
+
+A mapping only ever rewrites a path *prefix*, so a real mapping fault leaves the filename
+untouched and the basename search finds it. That is genuine file-level evidence, and it
+is what lets television reach the diagnosis honestly. Without it the verdict falls back
+to "not in your library yet, trigger a scan", which covers both cases and overclaims
+neither.
+
+## Finding 18 — Ombi's `/Status` is anonymous, but rejects a key it does not like
+
+Three states, verified against a live Ombi, and no two behave alike:
+
+| Request | `/api/v1/Status` | `/api/v1/Request/movie` |
+|---|---|---|
+| no `ApiKey` header at all | **200** | 401 |
+| `ApiKey` present but wrong | **401** | 401 |
+| `ApiKey` correct | 200 | 200 |
+
+So the probe endpoint is reachable anonymously, and a probe written to send no
+credentials would report a healthy Ombi no matter what key the user typed. We always send
+the header, which turns `/Status` into a real credential check — an empty key gives a
+clean 401 rather than a false success.
+
+`/Status` returns the bare integer `200` as its JSON body, not an object, so no version
+can be read from it. The probe tolerates that and reports no version rather than
+inventing one.
+
+## Finding 19 — a media server can answer perfectly and still have nothing to say
+
+Verified against a live Jellyfin: a fully started, authenticated server with no libraries
+configured answers the library query with
+
+```
+HTTP 200  {"Items": [], "TotalRecordCount": 0, "StartIndex": 0}
+```
+
+Nothing about that is an error. The poll records a success, the service shows as healthy,
+and the path index comes back empty — at which point every tracked request checked
+against it reads as "imported, but not in your library". One misconfigured or
+still-scanning media server thereby produces a confident wrong verdict on every request
+at once.
+
+This is Finding 13 arriving through a *successful* read instead of a failed one, which is
+exactly why a reachability check could not catch it. `can_speak_for` now also refuses to
+speak for a media server whose library came back empty, and the ingester records the
+empty result rather than checking requests against it. The service is deliberately **not**
+marked as failing: it answered, and backing off a working server would be its own bug.
+
+Two related shapes worth naming, since the next product will have them too:
+
+* **Startup is not a state, it is several.** Jellyfin answers `/System/Info/Public` with
+  `HTTP 503` and an HTML body — `Jellyfin Server is loading` — while every authenticated
+  endpoint already returns a normal `401`. The probe reports the 503 honestly and retries.
+* **Never end a paginated walk quietly.** A page that cannot be read used to `return`,
+  handing back a short library with no indication it was short — and a short library is
+  read downstream as files the server does not have. It raises now.
 
 ## Coverage without a live instance
 

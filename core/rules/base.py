@@ -150,6 +150,13 @@ class RuleContext:
             return False
         if service.last_seen_ok is None:
             return False  # never completed a successful poll, so nothing was ever looked at
+        # Answering is not the same as having anything to say. A media server with no
+        # libraries configured, or one still on its first scan, returns an entirely
+        # healthy empty list -- and an empty library cannot testify that a particular
+        # file is absent from it.
+        state = service.client_state if isinstance(service.client_state, dict) else {}
+        if state.get("empty_library"):
+            return False
         return (self.now - service.last_seen_ok) <= self.EVIDENCE_STALE_AFTER
 
     def unreachable_verdict(self, service, what: str) -> Verdict:
@@ -171,6 +178,15 @@ class RuleContext:
             detail = (
                 f"{service.name} has failed {service.consecutive_failures} time(s) in a "
                 f"row{reason}"
+            )
+        elif isinstance(service.client_state, dict) and service.client_state.get(
+            "empty_library"
+        ):
+            detail = (
+                f"{service.name} is answering normally but reports an empty library. "
+                "That usually means it has no libraries configured yet, or is still "
+                "running its first scan — until it has something in it, nothing can be "
+                "concluded about what is missing from it"
             )
         else:
             mins = (self.now - service.last_seen_ok).total_seconds() / 60
@@ -241,7 +257,14 @@ class RuleContext:
         return getattr(cls, "links_to_arr_entity", True)
 
     def media_server_url(self) -> tuple[str, str]:
-        """(url, label) for the Plex web UI, if a Plex service is configured."""
+        """(url, label) for the configured media server's own web UI.
+
+        Delegated to the client class rather than built here. Plex's deep link is a
+        `#!/server/-/details?key=...` fragment and Jellyfin's is `#!/details?id=...`;
+        emitting the Plex form for all three sent every Jellyfin and Emby user to a dead
+        link labelled "Open in Plex", under a verdict about their own library.
+        """
+        from core.clients.mediaserver import media_server_client
         from core.models import ServiceInstance, ServiceKind
 
         service = ServiceInstance.objects.filter(
@@ -249,13 +272,14 @@ class RuleContext:
         ).first()
         if service is None:
             return "", ""
-        if self.request.media_server_item_id:
-            return (
-                f"{service.url}/web/index.html#!/server/-/details"
-                f"?key=%2Flibrary%2Fmetadata%2F{self.request.media_server_item_id}",
-                "Open in Plex",
-            )
-        return f"{service.url}/web", "Open Plex"
+        # Constructing a client opens no connection, and item_url only formats a string.
+        client = media_server_client(service)
+        label = (
+            f"Open in {client.product}"
+            if self.request.media_server_item_id
+            else f"Open {client.product}"
+        )
+        return client.item_url(self.request.media_server_item_id), label
 
     def request_manager_url(self) -> tuple[str, str]:
         service = self.request.service

@@ -95,11 +95,30 @@ def sync_media_servers() -> None:
         try:
             with client:
                 index = client.build_path_index()
-                for tracked in candidates:
-                    # ServiceError propagates: a missing item already returns None from
-                    # client.item(), so anything here is service-level and retrying it
-                    # once per candidate would stall the cycle on a dead Plex.
-                    _check_request(client, service, tracked, index, mappings)
+
+                # An empty library is not a reading about the user's files. A media
+                # server with no libraries configured, or one still running its first
+                # scan, answers the library query with a perfectly healthy HTTP 200 and
+                # an empty list -- verified against a live Jellyfin, which returns
+                # {"Items": [], "TotalRecordCount": 0} in exactly that state.
+                #
+                # Checking requests against it would mark every single one "not in your
+                # library" and send the user hunting for a missing file per request,
+                # when the one thing worth saying is that the library came back empty.
+                _record_library_state(service, empty=not index)
+                if index:
+                    for tracked in candidates:
+                        # ServiceError propagates: a missing item already returns None
+                        # from client.item(), so anything here is service-level and
+                        # retrying it once per candidate would stall the cycle on a
+                        # dead Plex.
+                        _check_request(client, service, tracked, index, mappings)
+                else:
+                    logger.warning(
+                        "%s reported an empty library, so nothing can be concluded "
+                        "about whether any request arrived in it.",
+                        service.name,
+                    )
             client.record_success()
         except ServiceError as exc:
             client.record_failure(exc)
@@ -108,6 +127,39 @@ def sync_media_servers() -> None:
         finally:
             client.close()
 
+
+def _record_library_state(service: ServiceInstance, *, empty: bool) -> None:
+    """Remember whether the library had anything in it, for the rules to consult.
+
+    Kept out of the health fields on purpose: the service answered, so calling it failed
+    would start backing off a server that is working and show it as broken in the UI.
+    What is unusable is its evidence, not the service.
+    """
+    state = service.client_state if isinstance(service.client_state, dict) else {}
+    if state.get("empty_library") == empty:
+        return
+    state = {**state, "empty_library": empty}
+    service.client_state = state
+    ServiceInstance.objects.filter(pk=service.pk).update(client_state=state)
+
+
+
+def identifies_one_file(item: MediaItem) -> bool:
+    """Whether an id match pins down the exact file the *arr imported.
+
+    For a movie it does: the item is the film, and the film is one file.
+
+    For television it never does, on any of the three products. Every id a request
+    carries is a *series* id -- tvdb series ids from Seerr, a show rating key from Plex,
+    series ProviderIds from Jellyfin -- so the best an id join can say is "this series is
+    in the library". It cannot say the episode in question is.
+
+    The distinction decides whether we may claim a path mapping is wrong. "The server has
+    this exact file under another path" is a mapping problem; "the server has this show"
+    is equally consistent with the new episode simply not being scanned yet, and telling
+    someone to fix a mapping that is fine sends them to break a working configuration.
+    """
+    return item.item_type.lower() == "movie" and bool(item.paths)
 
 
 def _find_by_id(
@@ -129,6 +181,10 @@ def _find_by_id(
             return found
 
     # Jellyfin/Emby expose provider ids, so we can match without any stored id at all.
+    #
+    # Episodes carry their series' ids here, not their own -- the client resolves that,
+    # because the two are different numbering spaces and comparing across them matches
+    # unrelated shows. See JellyfinClient._parse_item.
     if tracked.tmdb_id or tracked.tvdb_id:
         for item in index.values():
             if tracked.tmdb_id and item.tmdb_id == tracked.tmdb_id:
@@ -155,9 +211,21 @@ def _check_request(
     arr_paths = imported_paths(tracked)
     match: PathMatchResult = match_paths(arr_paths, index, mappings)
 
-    tracked.media_server_found = bool(by_id or match.found)
+    # A mapping only ever rewrites a path *prefix*, so a genuine mapping problem leaves
+    # the filename untouched and the basename search finds it. That makes the basename
+    # candidate real file-level evidence, and it is what lets television reach the
+    # mismatch diagnosis at all -- an id match alone only ever proves the series is
+    # present.
+    file_level = by_id is not None and (
+        identifies_one_file(by_id) or bool(match.basename_candidate)
+    )
+
+    # "Found" has to mean this request's file, not merely something related to it.
+    # Counting a series-level hit as found marks an episode nobody can watch yet as
+    # present, and silences the one rule that would have said so.
+    tracked.media_server_found = bool(match.found or file_level)
     tracked.media_server_matched_path = match.matched_path or ""
-    if by_id and not tracked.media_server_item_id:
+    if file_level and not tracked.media_server_item_id:
         tracked.media_server_item_id = by_id.item_id
     tracked.save(
         update_fields=[
@@ -189,7 +257,7 @@ def _check_request(
         )
         return
 
-    if by_id is not None:
+    if by_id is not None and file_level:
         # The server has the item, but none of the translated *arr paths matched any of
         # its files. That is a path-mapping problem, not a missing file -- and we can
         # usually name the exact prefix pair that would fix it.

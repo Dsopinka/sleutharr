@@ -154,6 +154,24 @@ def _remove_deleted(
     if not count:
         return 0
 
+    # Defence in depth, not politeness. Everything above rests on the walk having raised
+    # if it went wrong, and a client that quietly returns nothing on failure defeats all
+    # of it -- which is exactly how Ombi used to wipe a library's worth of history.
+    #
+    # A walk that saw *nothing at all* is the one reading a broken client and an emptied
+    # request manager produce alike. Between deleting everything and keeping entries the
+    # user may have removed, keeping them is the recoverable mistake: stale rows can be
+    # deleted by hand, and the next walk that genuinely reads something will clear them.
+    if not seen_ids:
+        logger.warning(
+            "%s: a complete walk returned no requests at all while %d are tracked. "
+            "Refusing to delete them -- this is far more often a failed read than a "
+            "request manager that has genuinely been emptied.",
+            service.name,
+            count,
+        )
+        return 0
+
     stale.delete()
     logger.info(
         "%s: removed %d request(s) deleted upstream: %s",

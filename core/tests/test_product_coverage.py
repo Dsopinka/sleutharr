@@ -677,3 +677,85 @@ class LiveObservations(TestCase):
         """Confirmed against NZBGet 26.2: a healthy group reports Health=1000."""
         self.assertAlmostEqual(nzbget(Health=1000).health, 100.0, places=1)
         self.assertAlmostEqual(nzbget(Health=500).health, 50.0, places=1)
+
+
+# The exact rows a live Jellyfin 10.11.11 returned for one scanned episode and its
+# series. The two Tvdb numbers are the whole point: 306329 identifies the episode,
+# 79257 identifies the series, and only 79257 is a number any request ever carries.
+JELLYFIN_SERIES = {
+    "Id": "12fe27a82c26552ef837d43ef80c70c5",
+    "Name": "Planet Earth",
+    "Type": "Series",
+    "ProviderIds": {"Imdb": "tt0795176", "Tmdb": "1044", "Tvdb": "79257"},
+}
+
+JELLYFIN_EPISODE = {
+    "Id": "898ef192ba9505467083183808a84c82",
+    "Name": "From Pole to Pole",
+    "Type": "Episode",
+    "Path": "/data/media/tv/Planet Earth (2006)/Season 01/"
+            "Planet Earth (2006) - S01E01 - From Pole to Pole.mp4",
+    "SeriesName": "Planet Earth",
+    "SeriesId": "12fe27a82c26552ef837d43ef80c70c5",
+    "ProviderIds": {"Imdb": "tt0797603", "TvRage": "330114", "Tvdb": "306329"},
+}
+
+
+class EpisodeIdsAreNotSeriesIds(TestCase):
+    """An episode's ProviderIds belong to the episode, and nothing joins on those.
+
+    Observed on a live Jellyfin 10.11.11 and structurally identical on Emby 4.9.5.0.
+    Every id that reaches this join is a series id -- Seerr stores the series tvdbId,
+    Sonarr looks series up by it -- so reading the episode's own id compares two
+    different numbering spaces.
+
+    That does not merely fail to match. Both are bare integers over overlapping ranges,
+    so it can match a different show entirely and report it as present in the library.
+    """
+
+    def test_an_episode_alone_yields_no_join_ids(self):
+        """Better to know nothing than to offer an id from the wrong namespace."""
+        item = JellyfinClient._parse_item(JELLYFIN_EPISODE)
+        self.assertIsNone(item.tvdb_id)
+        self.assertIsNone(item.tmdb_id)
+        self.assertNotEqual(item.tvdb_id, 306329, "episode's own tvdb id leaked out")
+
+    def test_an_episode_takes_its_series_ids(self):
+        series = {JELLYFIN_SERIES["Id"]: (1044, 79257)}
+        item = JellyfinClient._parse_item(JELLYFIN_EPISODE, series)
+        self.assertEqual(item.tvdb_id, 79257)
+        self.assertEqual(item.tmdb_id, 1044)
+
+    def test_the_series_row_reads_its_own_ids(self):
+        series = JellyfinClient._parse_item(JELLYFIN_SERIES)
+        self.assertEqual((series.tmdb_id, series.tvdb_id), (1044, 79257))
+
+    def test_an_unknown_series_leaves_the_episode_unjoinable(self):
+        """A series we did not read is not licence to fall back to the episode's id."""
+        item = JellyfinClient._parse_item(JELLYFIN_EPISODE, {"someone-else": (1, 2)})
+        self.assertIsNone(item.tvdb_id)
+
+    def test_movies_still_read_their_own_ids(self):
+        for cls in (JellyfinClient, EmbyClient):
+            with self.subTest(product=cls.product):
+                self.assertEqual(cls._parse_item(JELLYFIN_MOVIE).tmdb_id, 693134)
+
+    def test_an_id_match_on_television_is_not_a_file_match(self):
+        """What the mismatch diagnosis is allowed to claim.
+
+        "The server has this exact file under another path" is a mapping problem. "The
+        server has this show" is equally consistent with the episode not being scanned
+        yet, and sending someone to change a working path mapping over it is how a
+        correct configuration gets broken.
+        """
+        from core.ingest.mediaserver import identifies_one_file
+
+        episode = JellyfinClient._parse_item(
+            JELLYFIN_EPISODE, {JELLYFIN_SERIES["Id"]: (1044, 79257)}
+        )
+        self.assertFalse(identifies_one_file(episode))
+        self.assertTrue(identifies_one_file(JellyfinClient._parse_item(JELLYFIN_MOVIE)))
+
+        # Plex spells its types in lower case and gives a show no Part at all.
+        show = PlexClient._parse_item({"ratingKey": "9", "title": "x", "type": "show"})
+        self.assertFalse(identifies_one_file(show))

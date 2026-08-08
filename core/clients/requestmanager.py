@@ -332,18 +332,29 @@ class OmbiClient(RequestManagerClient):
     def iter_requests(
         self, *, page_size: int = 50, filter_: str = "all", newest_first: bool = True
     ) -> Iterator[NormalisedRequest]:
-        """Ombi returns whole unpaginated arrays, one endpoint per media type."""
+        """Ombi returns whole unpaginated arrays, one endpoint per media type.
+
+        Failures are deliberately *not* caught here. Carrying on past a failed endpoint
+        looks like resilience -- half the requests are better than none -- but this
+        generator's caller cannot see that anything went wrong, and it reads a walk that
+        finishes without raising as a complete census of what the user has asked for.
+        An absence in that census is what it deletes on.
+
+        So a swallowed 401 does not cost us one sync; it deletes every tracked request
+        and its timeline, which is the one thing here that fixing the config afterwards
+        will not bring back. Raising costs one sync.
+        """
         for path, media_type in (
             ("/Request/movie", MediaType.MOVIE),
             ("/Request/tv", MediaType.TV),
         ):
-            try:
-                rows = self.get_json(path)
-            except ServiceError as exc:
-                logger.warning("Ombi %s failed: %s", path, exc)
-                continue
+            rows = self.get_json(path)
             if not isinstance(rows, list):
-                continue
+                raise ServiceError(
+                    f"Ombi {path} did not return an array (got "
+                    f"{type(rows).__name__}). Check the base URL points at Ombi's API "
+                    "root -- some installs sit behind a /requests sub-path."
+                )
             for row in rows:
                 if not isinstance(row, dict):
                     continue

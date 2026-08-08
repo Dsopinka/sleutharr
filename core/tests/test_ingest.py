@@ -485,6 +485,29 @@ class DeletionReconcileTests(TestCase):
 
         self.assertEqual(TrackedRequest.objects.count(), 3)
 
+    def test_a_walk_that_saw_nothing_at_all_never_deletes(self):
+        """The last line of defence, and deliberately product-agnostic.
+
+        Everything else here rests on a broken walk raising. A client that returns an
+        empty list instead of raising defeats all of it, and the result is silent,
+        permanent data loss -- so an empty census is refused outright rather than
+        trusted.
+
+        The cost is real and accepted: a user who genuinely deletes every request keeps
+        seeing them here until one is re-added or they clear them by hand. That is the
+        recoverable direction of the trade.
+        """
+        self._sync(self.payload["results"])
+        self.assertEqual(TrackedRequest.objects.count(), 3)
+
+        self._sync([], force_reconcile=True)
+
+        self.assertEqual(
+            TrackedRequest.objects.count(),
+            3,
+            "an empty walk was trusted as proof the user deleted everything",
+        )
+
     def test_requests_older_than_the_cutoff_are_left_alone(self):
         """They were never walked, so their absence from the list means nothing."""
         from django.utils import timezone as tz
@@ -498,3 +521,118 @@ class DeletionReconcileTests(TestCase):
         )
         self._sync(self.payload["results"], force_reconcile=True)
         self.assertTrue(TrackedRequest.objects.filter(pk=old.pk).exists())
+
+
+class OmbiFailedWalkTests(TestCase):
+    """The same protection as `test_a_failed_walk_never_deletes`, on Ombi.
+
+    Ombi reaches the deletion logic by a different route, and used to defeat it. Its
+    `iter_requests` walks two endpoints and caught the error from each one so that a
+    failure of one did not lose the other. The effect was that a walk which read nothing
+    at all still ended as a *successful, complete* walk -- and a complete walk that saw
+    no requests is precisely the evidence `_remove_deleted` acts on.
+
+    Found against a live Ombi: with no API key, or a rotated one, both endpoints answer
+    401. Within one reconcile window every tracked request and its whole timeline was
+    deleted, which is the one failure in this application that cannot be undone by
+    fixing the config afterwards.
+    """
+
+    def setUp(self):
+        self.ombi = make_service(
+            ServiceKind.REQUEST_MANAGER,
+            name="Ombi",
+            variant=ServiceVariant.OMBI,
+            base_url="http://ombi:3579",
+        )
+        self.rows = [
+            {
+                "id": 1,
+                "title": "Arrival",
+                "theMovieDbId": 329865,
+                "requestedDate": "2026-07-01T10:00:00Z",
+                "approved": True,
+                "available": False,
+            }
+        ]
+
+    def _client(self, handler):
+        from core.clients.requestmanager import OmbiClient
+
+        client = OmbiClient(self.ombi)
+        return client, mock_client(client, handler)
+
+    def _sync(self, handler, **kwargs):
+        client, patched = self._client(handler)
+        with patched, mock.patch(
+            "core.ingest.requests.request_manager_client", return_value=client
+        ):
+            return sync_service_requests(self.ombi, **kwargs)
+
+    def _ok(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/Request/movie"):
+            return _json(self.rows)
+        return _json([])
+
+    def test_a_seeded_request_is_tracked(self):
+        self._sync(self._ok)
+        self.assertEqual(TrackedRequest.objects.count(), 1)
+
+    def test_an_unauthorised_walk_never_deletes(self):
+        """401 on both endpoints is not evidence that the user deleted everything."""
+        from core.clients.base import ServiceError
+
+        self._sync(self._ok)
+        self.assertEqual(TrackedRequest.objects.count(), 1)
+
+        def unauthorised(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, text="Invalid API Key")
+
+        with self.assertRaises(ServiceError):
+            self._sync(unauthorised, force_reconcile=True)
+
+        self.assertEqual(
+            TrackedRequest.objects.count(),
+            1,
+            "a rejected API key deleted the user's tracked requests",
+        )
+
+    def test_one_broken_endpoint_never_deletes_the_other_media_type(self):
+        """The subtler half: a partial read is still not a complete walk.
+
+        If only /Request/tv fails, the walk yields every movie and no TV -- which reads
+        as "the user deleted all their TV requests" and is indistinguishable from it
+        unless the failure is allowed to surface.
+        """
+        from core.clients.base import ServiceError
+
+        tv_row = {
+            "id": 2,
+            "title": "Severance",
+            "tvDbId": 371980,
+            "requestedDate": "2026-07-02T10:00:00Z",
+            "approved": True,
+            "available": False,
+        }
+
+        def both(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/Request/movie"):
+                return _json(self.rows)
+            return _json([tv_row])
+
+        self._sync(both)
+        self.assertEqual(TrackedRequest.objects.count(), 2)
+
+        def tv_broken(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/Request/movie"):
+                return _json(self.rows)
+            return httpx.Response(500, text="boom")
+
+        with self.assertRaises(ServiceError):
+            self._sync(tv_broken, force_reconcile=True)
+
+        self.assertEqual(
+            TrackedRequest.objects.count(),
+            2,
+            "one failing endpoint deleted the other media type's requests",
+        )

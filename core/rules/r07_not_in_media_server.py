@@ -66,9 +66,9 @@ class NotInMediaServer(Rule):
                 )
             return self.verdict(
                 f"The file is in {server}, but no configured path mapping translates "
-                f"the *arr's path to the path {server} reports. Sleutharr can see the item only "
-                "because the request manager stored its rating key — anything relying "
-                "on path matching (including your own scripts) will be wrong too."
+                f"the *arr's path to the path {server} reports. Sleutharr can only tell "
+                "because it matched the item another way — anything relying on path "
+                "matching (including your own scripts) will be wrong too."
                 + hint,
                 next_step=(
                     "Add the path mapping shown in the timeline entry on the Settings "

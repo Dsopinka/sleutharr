@@ -374,15 +374,18 @@ no JS build step. htmx is vendored, so the UI needs no outbound internet.
 - **rTorrent/ruTorrent is not supported.** Its XML-RPC interface is different enough to
   need its own client; the `DownloadClient` interface has room for it.
 - **Ombi's join is weaker than the Seerr family's** — see Supported services above.
-- **No live upstream instance was available during development**, so all API behaviour
-  comes from upstream specs and source rather than a running server. The `linux/amd64`
-  image itself *was* built and run: it starts as `uid=99 gid=100`, migrates, persists
-  `/config` across restarts, serves every page, reaches `healthy`, and passes all 149
-  tests inside the image.
-- **No live upstream instance was available** during development. All API behaviour was
-  verified against upstream OpenAPI schemas and source code rather than a running server;
-  see the `[UNVERIFIED-LIVE]` markers in `docs/api-notes.md` for the specific items worth
-  confirming with `probe_services --verify`.
+- **Not every integration has been driven against a live server.** Transmission, Deluge,
+  NZBGet, SABnzbd, Jellyfin, Emby and Ombi have; Seerr/Overseerr, Sonarr, Radarr,
+  qBittorrent and Plex are still verified against upstream OpenAPI schemas and source
+  code alone. `docs/api-notes.md` records which is which, and the `[UNVERIFIED-LIVE]`
+  markers there are the specific items worth confirming with `probe_services --verify`.
+
+  This distinction has earned its keep: every product pointed at a real server so far has
+  turned up at least one bug that reading its documentation could not, and in two cases
+  the integration did not work at all.
+- The `linux/amd64` image is built and run before release: it starts as `uid=99 gid=100`,
+  migrates, persists `/config` across restarts, serves every page, reaches `healthy`, and
+  runs the full test suite inside the image.
 
 ## Support
 
