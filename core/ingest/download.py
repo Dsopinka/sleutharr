@@ -154,7 +154,9 @@ def sync_download_clients() -> None:
         try:
             with client:
                 items = client.items_by_id(all_ids)
+                health = client.provider_health()
             client.record_success()
+            _store_provider_health(service, health)
         except ServiceError as exc:
             client.record_failure(exc)
             continue
@@ -175,6 +177,18 @@ def sync_download_clients() -> None:
                 item = items.get(download_id)
                 if item is not None:
                     _record_item(service, tracked, item)
+
+
+def _store_provider_health(service: ServiceInstance, health) -> None:
+    """Persist the client's self-reported state so rules can read it without I/O.
+
+    Torrent clients return None -- there is no single upstream whose failure stops
+    everything -- and that is stored as an empty dict meaning "not applicable", which is
+    distinct from a recorded "everything is fine".
+    """
+    state = health.as_dict() if health is not None else {}
+    state["checked_at"] = timezone.now().isoformat()
+    ServiceInstance.objects.filter(pk=service.pk).update(client_state=state)
 
 
 def _record_item(

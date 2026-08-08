@@ -44,6 +44,14 @@ class NoReleaseFound(Rule):
         if age < timedelta(days=wait_days):
             return None
 
+        # "Nothing has ever been grabbed" rests entirely on the *arr's history, so it is
+        # only sayable while the *arr is answering. If it is down, the absent grabs are
+        # absent from Sleutharr, not from Sonarr.
+        if not ctx.can_speak_for(request.arr_service):
+            return ctx.unreachable_verdict(
+                request.arr_service, "why nothing has been grabbed yet"
+            )
+
         snapshot = request.arr_snapshot or {}
         profile = request.arr_quality_profile_name or "the configured profile"
         service = request.arr_service

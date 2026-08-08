@@ -617,3 +617,74 @@ This is why `DownloadItem.facts()` exists and why rules read `TimelineEvent.fact
 than `TimelineEvent.raw`. Each product's parser is the only code permitted to know its own
 field names. `core/tests/test_rules.py::UsenetIsNotATorrent` asserts no rule reaches into a
 raw download payload, so the class of bug cannot come back by way of a new rule.
+
+---
+
+## Finding 13 — an absence is only evidence if something actually looked
+
+Not an API quirk, but the failure mode most likely to produce a confidently wrong
+verdict, so it belongs here.
+
+Nearly every diagnosis Sleutharr makes is an assertion about something that is *not*
+there: no entity in Sonarr, no grab in the history, no item in Plex. Each of those is
+read as a fact about the user's setup. But a service that is unreachable returns exactly
+the same empty result as a service that genuinely has nothing — and so does a service on
+a fresh install that has not finished its first sync.
+
+Left unguarded, a five-minute Sonarr outage relabels *every* tracked request as "never
+reached your library", and a first run declares the same thing about a library that is
+perfectly fine.
+
+The guard is `RuleContext.can_speak_for(service)`, which is false when the service is
+disabled, currently failing, has never once answered, or has not answered within
+`EVIDENCE_STALE_AFTER`. Rules that assert an absence call it first and return
+`EVIDENCE_UNAVAILABLE` instead of guessing — which is both true and useful, because an
+unreachable service is itself something the user wants to know about.
+
+This applies to the download-sample rules for a subtler reason: samples stop being
+written when a client stops answering, so the newest reading keeps ageing and
+"no progress for 20 hours" becomes a statement about Sleutharr's records rather than
+about the download.
+
+### Client-wide health, verified per product
+
+A usenet client we can reach perfectly well may still have no working news server, which
+stalls every download at once while each individual queue row looks blameless. Two
+products expose this, and they expose different things:
+
+| | SABnzbd | NZBGet |
+|---|---|---|
+| endpoint | `mode=status` | `status` (JSON-RPC) |
+| server list | `status.servers[]` | `NewsServers[]` |
+| name | `servername` | *(not reported — only `ID`)* |
+| error text | `servererror`, `""` when fine | *(not reported; log only)* |
+| enabled/active | `serveractive` | `Active` |
+| optional server | `serveroptional` | *(no equivalent)* |
+| paused | `paused` on the `mode=queue` object | `DownloadPaused` |
+| warnings | `mode=warnings` → `[{text, type, time}]` | *(log only)* |
+
+Two traps worth naming. SABnzbd's `serveroptional` servers are *meant* to be down
+sometimes — flagging those cries wolf. And NZBGet's `Active` means **enabled in the
+configuration**, not **currently connected**: reporting a disabled spare block account as
+a connection failure would be inventing an error the product never claimed. So NZBGet is
+only treated as broken when *every* server is disabled, and the wording says "disabled"
+rather than "cannot connect".
+
+Torrent clients return `None` from `provider_health()` — there is no single upstream
+whose failure stops everything — and "not applicable" is stored distinctly from
+"checked, and fine".
+
+## Finding 14 — series monitoring is not season monitoring
+
+`series.monitored` is a single flag on the whole show. A series can be monitored while
+the exact season the user requested has `monitored: false`, in which case nothing will
+ever be searched for it — and every downstream rule blames the indexers, sending the user
+to audit a search that was never run.
+
+Season shape verified against Sonarr's `SeasonResource`: `seasonNumber` (int) and
+`monitored` (bool), inside `seasons[]` on the series object.
+
+The rule stays silent unless it can be sure: an empty `requested_seasons` means a
+whole-series request, a snapshot with no `seasons` list means the data was never
+captured, and a season number the *arr did not mention is unknown rather than off. It
+fires only when every requested season the *arr did report is switched off.

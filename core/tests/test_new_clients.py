@@ -353,3 +353,157 @@ class IdUniquenessTests(TestCase):
         self.assertEqual(service.client_name, "NZBGet")
         service.arr_client_name = "NZBGet Main"
         self.assertEqual(service.client_name, "NZBGet Main")
+
+
+class ProviderHealthTests(TestCase):
+    """A client that cannot reach its provider stalls everything at once.
+
+    Field names below are taken from the SABnzbd 5.0 and NZBGet status API references,
+    not from memory -- the point of these tests is that our parsing matches what the
+    products actually send.
+    """
+
+    def _sab(self, status_payload, *, warnings=None, paused=False):
+        import httpx
+        from unittest import mock
+
+        service = make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            variant=ServiceVariant.SABNZBD,
+            name="sab",
+            base_url="http://sab:8080",
+        )
+        client = SabnzbdClient(service)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            mode = request.url.params.get("mode")
+            if mode == "status":
+                return httpx.Response(200, json={"status": status_payload})
+            if mode == "queue":
+                return httpx.Response(200, json={"queue": {"paused": paused}})
+            if mode == "warnings":
+                return httpx.Response(200, json={"warnings": warnings or []})
+            return httpx.Response(200, json={})
+
+        transport = httpx.MockTransport(handler)
+        real = httpx.Client(base_url=client.base_url, transport=transport)
+        with mock.patch.object(type(client), "http", property(lambda self: real)):
+            return client.provider_health()
+
+    def test_a_failing_news_server_is_reported_with_its_own_error(self):
+        health = self._sab(
+            {
+                "servers": [
+                    {
+                        "servername": "news.eweka.nl",
+                        "serveractive": False,
+                        "servererror": "Cannot connect to newshost",
+                        "serveroptional": False,
+                    }
+                ]
+            },
+            warnings=[{"text": "Cannot connect to newshost", "type": "ERROR"}],
+        )
+        self.assertFalse(health.ok)
+        self.assertEqual(len(health.failing_servers), 1)
+        # The client's own wording is quoted rather than paraphrased into a guess.
+        self.assertIn("Cannot connect to newshost", health.failing_servers[0])
+        self.assertIn("news.eweka.nl", health.failing_servers[0])
+        self.assertIn("Cannot connect to newshost", health.warnings)
+
+    def test_a_healthy_server_reports_ok(self):
+        health = self._sab(
+            {
+                "servers": [
+                    {
+                        "servername": "news.eweka.nl",
+                        "serveractive": True,
+                        "servererror": "",
+                        "serveroptional": False,
+                    }
+                ]
+            }
+        )
+        self.assertTrue(health.ok)
+        self.assertEqual(health.failing_servers, [])
+
+    def test_an_optional_server_being_down_is_not_a_fault(self):
+        """SAB carries on through the others, so flagging this would cry wolf."""
+        health = self._sab(
+            {
+                "servers": [
+                    {
+                        "servername": "block.account",
+                        "serveractive": False,
+                        "servererror": "Not connected",
+                        "serveroptional": True,
+                    },
+                    {
+                        "servername": "main",
+                        "serveractive": True,
+                        "servererror": "",
+                        "serveroptional": False,
+                    },
+                ]
+            }
+        )
+        self.assertTrue(health.ok)
+
+    def test_a_paused_queue_is_noticed_separately(self):
+        health = self._sab({"servers": []}, paused=True)
+        self.assertTrue(health.ok)
+        self.assertTrue(health.paused)
+
+    def test_missing_servers_key_is_unknown_not_broken(self):
+        """Older or trimmed responses must not read as a failure."""
+        health = self._sab({})
+        self.assertTrue(health.ok)
+        self.assertEqual(health.failing_servers, [])
+
+    def test_torrent_clients_have_no_provider_concept(self):
+        service = make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            variant=ServiceVariant.QBITTORRENT,
+            name="qbit",
+            base_url="http://qbit:8080",
+        )
+        self.assertIsNone(QBittorrentClient(service).provider_health())
+
+    def test_nzbget_reports_disabled_servers_as_disabled_not_failing(self):
+        """`Active` means enabled in the config, not currently connected."""
+        from unittest import mock
+
+        service = make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            variant=ServiceVariant.NZBGET,
+            name="nzbget",
+            base_url="http://nzbget:6789",
+        )
+        client = NzbgetClient(service)
+        payload = {
+            "NewsServers": [{"ID": 1, "Active": False}],
+            "DownloadPaused": False,
+        }
+        with mock.patch.object(NzbgetClient, "rpc", return_value=payload):
+            health = client.provider_health()
+        self.assertFalse(health.ok)
+        self.assertIn("disabled", health.failing_servers[0])
+
+    def test_nzbget_with_one_spare_server_disabled_is_fine(self):
+        """Plenty of setups keep a block account switched off; that is not a fault."""
+        from unittest import mock
+
+        service = make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            variant=ServiceVariant.NZBGET,
+            name="nzbget",
+            base_url="http://nzbget:6789",
+        )
+        client = NzbgetClient(service)
+        payload = {
+            "NewsServers": [{"ID": 1, "Active": True}, {"ID": 2, "Active": False}],
+            "DownloadPaused": False,
+        }
+        with mock.patch.object(NzbgetClient, "rpc", return_value=payload):
+            health = client.provider_health()
+        self.assertTrue(health.ok)

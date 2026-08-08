@@ -127,6 +127,11 @@ class ServiceInstance(models.Model):
     )
 
     # Health, written by the pollers.
+    # Client-wide state that is not about reachability: a usenet client we can talk to
+    # perfectly well may have no working news server, which stalls every download at once
+    # while each individual download looks blameless. See ProviderHealth.
+    client_state = models.JSONField(default=dict, blank=True)
+
     last_seen_ok = models.DateTimeField(null=True, blank=True)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)

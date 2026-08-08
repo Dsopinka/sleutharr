@@ -16,6 +16,7 @@ from core.models import (
     Diagnosis,
     EventType,
     MediaAvailability,
+    MediaType,
     RequestState,
     ServiceKind,
     ServiceVariant,
@@ -785,3 +786,281 @@ class UsenetIsNotATorrent(RuleTestCase):
                 if "DOWNLOAD_PROGRESS" in line and ".raw" in line:
                     offenders.append(f"{path}:{lineno}")
         self.assertEqual(offenders, [], f"rules reading raw download payloads: {offenders}")
+
+
+class SilenceIsNotEvidence(RuleTestCase):
+    """Most verdicts assert an absence, and an absence only counts if something looked.
+
+    A service that is down, or that has never finished its first sync, produces exactly
+    the same empty result as a service that genuinely has nothing. Treating the two the
+    same turns a five-minute Sonarr outage into "every one of your requests never reached
+    your library", which is both alarming and false.
+    """
+
+    def _sick(self, service, *, failures=3, error="Connection refused"):
+        service.consecutive_failures = failures
+        service.last_error = error
+        service.save(update_fields=["consecutive_failures", "last_error"])
+        return service
+
+    def test_unreachable_arr_does_not_become_never_added(self):
+        radarr = self._sick(make_service(ServiceKind.RADARR, name="Radarr"))
+        request = make_request(
+            service=self.seerr, arr_service=radarr, arr_entity_id=None
+        )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "EVIDENCE_UNAVAILABLE")
+        self.assertIn("Radarr", verdict.message)
+        self.assertIn("Connection refused", verdict.message)
+
+    def test_arr_that_has_never_synced_does_not_become_never_added(self):
+        """The first minutes of a fresh install must not condemn every request."""
+        radarr = make_service(ServiceKind.RADARR, name="Radarr", healthy=False)
+        request = make_request(
+            service=self.seerr, arr_service=radarr, arr_entity_id=None
+        )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "EVIDENCE_UNAVAILABLE")
+        self.assertIn("never answered", verdict.message)
+
+    def test_a_healthy_arr_still_reports_never_added(self):
+        """The guard must not swallow the real finding."""
+        radarr = make_service(ServiceKind.RADARR, name="Radarr")
+        request = make_request(
+            service=self.seerr, arr_service=radarr, arr_entity_id=None
+        )
+        self.assertEqual(self.verdict_for(request).code, "NEVER_ADDED")
+
+    def test_a_long_silent_arr_is_not_a_witness(self):
+        """Reachable once, hours ago, is not the same as reachable now."""
+        radarr = make_service(ServiceKind.RADARR, name="Radarr")
+        radarr.last_seen_ok = timezone.now() - timedelta(hours=6)
+        radarr.save(update_fields=["last_seen_ok"])
+        request = make_request(
+            service=self.seerr, arr_service=radarr, arr_entity_id=None
+        )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "EVIDENCE_UNAVAILABLE")
+        self.assertIn("has not answered", verdict.message)
+
+    def test_unreachable_media_server_does_not_become_not_in_media_server(self):
+        plex = self._sick(
+            make_service(
+                ServiceKind.MEDIA_SERVER,
+                name="Plex",
+                variant=ServiceVariant.PLEX,
+                base_url="http://plex:32400",
+            ),
+            error="timed out",
+        )
+        radarr = make_service(ServiceKind.RADARR, name="Radarr")
+        request = make_request(service=self.seerr, arr_service=radarr, has_file=True)
+        add_event(request, EventType.IMPORTED, hours_ago=8)
+
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "EVIDENCE_UNAVAILABLE")
+        self.assertIn("Plex", verdict.message)
+        self.assertNotEqual(verdict.code, "NOT_IN_MEDIA_SERVER")
+
+    def test_unreachable_arr_does_not_become_no_release_found(self):
+        radarr = self._sick(make_service(ServiceKind.RADARR, name="Radarr"))
+        request = make_request(service=self.seerr, arr_service=radarr, days_ago=30)
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "EVIDENCE_UNAVAILABLE")
+
+    def test_stale_download_samples_do_not_become_a_stall(self):
+        """No new samples means we stopped looking, not that the download stopped."""
+        client = make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            name="qbit",
+            variant=ServiceVariant.QBITTORRENT,
+            base_url="http://qbit:8080",
+        )
+        self._sick(client, error="Connection refused")
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        add_event(request, EventType.GRABBED, hours_ago=30)
+        for hours in (24, 8):
+            add_download_sample(
+                request, torrent_sample(0.42, state="stalledDL"),
+                hours_ago=hours, service=client,
+            )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "EVIDENCE_UNAVAILABLE")
+
+    def test_the_unreachable_verdict_points_at_the_health_page(self):
+        radarr = self._sick(make_service(ServiceKind.RADARR, name="Radarr"))
+        request = make_request(
+            service=self.seerr, arr_service=radarr, arr_entity_id=None
+        )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.link_url, "/health/")
+        # Never an error: an unreachable service is a fact to report, not a fault in
+        # the request being traced.
+        self.assertEqual(verdict.severity, Severity.INFO)
+
+
+class DownloaderProviderTests(RuleTestCase):
+    """The exact situation that prompted all of this: SAB up, news server down."""
+
+    def _sab_with_state(self, client_state):
+        client = make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            name="SABnzbd",
+            variant=ServiceVariant.SABNZBD,
+            base_url="http://sab:8080",
+        )
+        client.client_state = client_state
+        client.save(update_fields=["client_state"])
+        return client
+
+    def _request_with_sample(self, client):
+        request = make_request(service=self.seerr, arr_service=self.radarr)
+        add_event(request, EventType.GRABBED, hours_ago=30)
+        slot = {
+            "status": "Downloading",
+            "nzo_id": "SABnzbd_nzo_abc",
+            "filename": "Dune.Part.Two.2024.1080p.WEB-DL-GROUP",
+            "percentage": "41",
+            "mb": "3120.53",
+            "mbleft": "1840.22",
+        }
+        for hours in (24, 0.1):
+            add_download_sample(
+                request, slot, usenet=True, hours_ago=hours, service=client
+            )
+        return request
+
+    def test_a_down_news_server_is_named_as_the_cause(self):
+        client = self._sab_with_state(
+            {
+                "ok": False,
+                "failing_servers": ["news.eweka.nl: Cannot connect to newshost"],
+                "warnings": ["Cannot connect to newshost"],
+            }
+        )
+        verdict = self.verdict_for(self._request_with_sample(client))
+        self.assertEqual(verdict.code, "DOWNLOADER_PROVIDER_DOWN")
+        self.assertIn("Cannot connect to newshost", verdict.message)
+        self.assertIn("news.eweka.nl", verdict.message)
+        self.assertIn("blocklisting it would not help", verdict.next_step)
+
+    def test_a_paused_client_is_distinguished_from_a_paused_download(self):
+        client = self._sab_with_state({"ok": True, "paused": True})
+        verdict = self.verdict_for(self._request_with_sample(client))
+        self.assertEqual(verdict.code, "DOWNLOADER_PAUSED")
+        self.assertIn("client-wide pause", verdict.next_step)
+
+    def test_a_healthy_client_falls_through_to_the_normal_verdict(self):
+        client = self._sab_with_state({"ok": True, "paused": False})
+        verdict = self.verdict_for(self._request_with_sample(client))
+        self.assertEqual(verdict.code, "DOWNLOADER_NOT_PROGRESSING")
+
+
+class UnmonitoredSeasonTests(RuleTestCase):
+    """A monitored series can still have the requested season switched off.
+
+    `arr_monitored` is series-level, so this was invisible: the series looked healthy
+    and the request fell through to "nothing good enough found yet", which sends the
+    user to audit indexers that were never asked to search in the first place.
+    """
+
+    def _series(self, requested, seasons, **kwargs):
+        sonarr = make_service(ServiceKind.SONARR, name="Sonarr")
+        return make_request(
+            service=self.seerr,
+            arr_service=sonarr,
+            media_type=MediaType.TV,
+            requested_seasons=requested,
+            snapshot={"seasons": seasons},
+            days_ago=30,
+            **kwargs,
+        )
+
+    def test_requested_season_switched_off_is_named(self):
+        request = self._series(
+            [3],
+            [
+                {"seasonNumber": 1, "monitored": True},
+                {"seasonNumber": 2, "monitored": True},
+                {"seasonNumber": 3, "monitored": False},
+            ],
+        )
+        verdict = self.verdict_for(request)
+        self.assertEqual(verdict.code, "SEASON_UNMONITORED")
+        self.assertIn("season 3", verdict.message)
+
+    def test_a_monitored_requested_season_is_not_flagged(self):
+        request = self._series(
+            [3],
+            [
+                {"seasonNumber": 3, "monitored": True},
+                {"seasonNumber": 4, "monitored": False},
+            ],
+        )
+        self.assertNotEqual(
+            getattr(self.verdict_for(request), "code", None), "SEASON_UNMONITORED"
+        )
+
+    def test_partly_monitored_request_is_not_blamed_on_seasons(self):
+        """If any requested season is still live, this is not the blocking cause."""
+        request = self._series(
+            [3, 4],
+            [
+                {"seasonNumber": 3, "monitored": True},
+                {"seasonNumber": 4, "monitored": False},
+            ],
+        )
+        self.assertNotEqual(
+            getattr(self.verdict_for(request), "code", None), "SEASON_UNMONITORED"
+        )
+
+    def test_no_season_data_says_nothing(self):
+        """A snapshot without seasons is unknown, not unmonitored."""
+        request = self._series([3], [])
+        self.assertNotEqual(
+            getattr(self.verdict_for(request), "code", None), "SEASON_UNMONITORED"
+        )
+
+    def test_whole_series_request_is_unaffected(self):
+        request = self._series([], [{"seasonNumber": 1, "monitored": False}])
+        self.assertNotEqual(
+            getattr(self.verdict_for(request), "code", None), "SEASON_UNMONITORED"
+        )
+
+
+class EveryVerdictIsReadable(TestCase):
+    """No raw code may reach the page.
+
+    Rules emit codes as string literals scattered through their branches, so a new
+    branch is exactly the kind of thing that ships with SCREAMING_SNAKE_CASE showing in
+    the UI. This scans the rule sources rather than trusting anyone to remember.
+    """
+
+    def _emitted_codes(self) -> set[str]:
+        import pathlib
+        import re
+
+        codes: set[str] = set()
+        for path in sorted(pathlib.Path("core/rules").glob("*.py")):
+            text = path.read_text()
+            codes |= set(re.findall(r'^\s*code\s*=\s*"([A-Z0-9_]+)"', text, re.M))
+            codes |= set(re.findall(r'code="([A-Z0-9_]+)"', text))
+        return codes
+
+    def test_every_code_has_plain_english_wording(self):
+        from core.rules import DIAGNOSIS_TITLES
+
+        missing = sorted(self._emitted_codes() - set(DIAGNOSIS_TITLES))
+        self.assertEqual(
+            missing, [], f"verdict codes with no readable title: {missing}"
+        )
+
+    def test_titles_are_sentences_not_jargon(self):
+        from core.rules import DIAGNOSIS_TITLES
+
+        shouty = [
+            code
+            for code, title in DIAGNOSIS_TITLES.items()
+            if title.isupper() or "_" in title
+        ]
+        self.assertEqual(shouty, [], f"titles that are really codes: {shouty}")

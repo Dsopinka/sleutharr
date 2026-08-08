@@ -34,7 +34,15 @@ def make_service(
     base_url: str = "http://arr.local:7878",
     remote_service_id: int | None = None,
     is_4k: bool = False,
+    healthy: bool = True,
 ) -> ServiceInstance:
+    """A configured service, healthy and recently polled unless told otherwise.
+
+    `healthy` matters more than it looks: rules refuse to conclude anything from the
+    silence of a service that has never answered, so a fixture left at the model default
+    (`last_seen_ok=None`) represents a service that was never reachable, and every
+    absence-based verdict correctly declines to fire against it.
+    """
     return ServiceInstance.objects.create(
         kind=kind,
         variant=variant,
@@ -43,6 +51,7 @@ def make_service(
         api_key="k",
         remote_service_id=remote_service_id,
         is_4k=is_4k,
+        last_seen_ok=timezone.now() if healthy else None,
     )
 
 
@@ -95,9 +104,11 @@ def add_event(
     raw: dict | None = None,
     source_kind: str = ServiceKind.RADARR,
     dedupe_key: str = "",
+    service: ServiceInstance | None = None,
 ) -> TimelineEvent:
     return TimelineEvent.objects.create(
         request=request,
+        service=service,
         source_kind=source_kind,
         event_type=event_type,
         occurred_at=timezone.now() - timedelta(hours=hours_ago),
@@ -157,14 +168,30 @@ def add_download_sample(
     *,
     usenet: bool = False,
     hours_ago: float = 1,
+    service: ServiceInstance | None = None,
     **kwargs,
 ) -> TimelineEvent:
-    """A DOWNLOAD_PROGRESS event carrying both the raw payload and normalised facts."""
+    """A DOWNLOAD_PROGRESS event carrying both the raw payload and normalised facts.
+
+    The event is attributed to a healthy download client, because rules refuse to judge
+    a transfer from readings taken by a client that is not currently answering -- without
+    a service attached, every sample would read as evidence nobody can vouch for.
+    """
+    if service is None:
+        service = ServiceInstance.objects.filter(
+            kind=ServiceKind.DOWNLOAD_CLIENT
+        ).first() or make_service(
+            ServiceKind.DOWNLOAD_CLIENT,
+            name="sab" if usenet else "qbit",
+            variant=ServiceVariant.SABNZBD if usenet else ServiceVariant.QBITTORRENT,
+            base_url="http://dl.local:8080",
+        )
     event = add_event(
         request,
         EventType.DOWNLOAD_PROGRESS,
         hours_ago=hours_ago,
         raw=raw,
+        service=service,
         source_kind=kwargs.pop("source_kind", ServiceKind.DOWNLOAD_CLIENT),
         **kwargs,
     )

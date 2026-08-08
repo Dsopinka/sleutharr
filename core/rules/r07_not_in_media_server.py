@@ -85,6 +85,15 @@ class NotInMediaServer(Rule):
         if request.media_server_found:
             return None
 
+        # Everything below asserts the item is absent from the library. That is only a
+        # finding if the library was actually searched -- a Plex that is down, or one
+        # that has not finished its first sync, produces the same empty result as a Plex
+        # that genuinely lacks the file.
+        if not ctx.can_speak_for(ctx.media_server):
+            return ctx.unreachable_verdict(
+                ctx.media_server, f"whether this arrived in {server}"
+            )
+
         missing = ctx.of_type(EventType.MEDIA_SERVER_MISSING)
         grace_minutes = float(ctx.setting("plex_grace_minutes") or 60)
 

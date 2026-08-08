@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Iterable, Sequence
 
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import (
@@ -126,6 +127,71 @@ class RuleContext:
             return "", ""
         return f"{service.url}/activity/queue", f"{service.name} queue"
 
+    # -- can this evidence be trusted? -----------------------------------------
+    #
+    # Most verdicts assert an *absence*: never added, nothing grabbed, not in your
+    # media server. An absence is only a finding if something actually looked. If the
+    # service that would have shown presence is unreachable, or has never finished a
+    # sync, then "it is not there" is not evidence -- it is ignorance, and reporting it
+    # as a verdict sends the user to investigate a problem that does not exist.
+
+    #: A service that has not answered for longer than this is not a witness to anything.
+    EVIDENCE_STALE_AFTER = timedelta(minutes=30)
+
+    def can_speak_for(self, service) -> bool:
+        """Whether this service's silence means anything.
+
+        False when it is disabled, currently failing, or has never once answered --
+        in which case no rule may conclude anything from what it did not report.
+        """
+        if service is None or not service.enabled:
+            return False
+        if service.consecutive_failures > 0:
+            return False
+        if service.last_seen_ok is None:
+            return False  # never completed a successful poll, so nothing was ever looked at
+        return (self.now - service.last_seen_ok) <= self.EVIDENCE_STALE_AFTER
+
+    def unreachable_verdict(self, service, what: str) -> Verdict:
+        """The honest answer when the evidence is missing rather than damning.
+
+        This is a real finding in its own right -- a service Sleutharr cannot reach is
+        something the user wants to know about -- and it is always true, which a guessed
+        verdict would not be.
+        """
+        if service is None:
+            detail = "the service that would answer this is not configured"
+        elif not service.enabled:
+            detail = f"{service.name} is turned off in Settings"
+        elif service.last_seen_ok is None:
+            detail = f"{service.name} has never answered successfully"
+        elif service.consecutive_failures > 0:
+            error = (service.last_error or "").strip().splitlines()
+            reason = f" — {error[0][:160]}" if error else ""
+            detail = (
+                f"{service.name} has failed {service.consecutive_failures} time(s) in a "
+                f"row{reason}"
+            )
+        else:
+            mins = (self.now - service.last_seen_ok).total_seconds() / 60
+            detail = f"{service.name} has not answered for {mins:.0f} minutes"
+
+        return Verdict(
+            code="EVIDENCE_UNAVAILABLE",
+            severity=Severity.INFO,
+            message=(
+                f"Sleutharr cannot tell you {what}, because {detail}. Rather than guess, "
+                f"it is saying so."
+            ),
+            next_step=(
+                "Open the Health page and test the connection. Once it answers again "
+                "this request will be re-diagnosed automatically on the next cycle."
+            ),
+            link_url=reverse("health"),
+            link_label="Health",
+            evidence=[],
+        )
+
     @property
     def media_server_configured(self) -> bool:
         """Whether any media server exists to have looked in.
@@ -137,6 +203,14 @@ class RuleContext:
         return ServiceInstance.objects.filter(
             kind=ServiceKind.MEDIA_SERVER, enabled=True
         ).exists()
+
+    @property
+    def media_server(self):
+        from core.models import ServiceInstance, ServiceKind
+
+        return ServiceInstance.objects.filter(
+            kind=ServiceKind.MEDIA_SERVER, enabled=True
+        ).first()
 
     @property
     def media_server_name(self) -> str:

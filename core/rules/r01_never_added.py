@@ -44,6 +44,14 @@ class NeverAdded(Rule):
                 code="NO_ARR_INSTANCE",
             )
 
+        # "Nothing matching exists in Sonarr" is only true if Sonarr answered. When it is
+        # unreachable the join simply never ran, and on a fresh install it has not run
+        # yet -- in both cases every request would be declared never-added at once.
+        if not ctx.can_speak_for(request.arr_service):
+            return ctx.unreachable_verdict(
+                request.arr_service, "whether this ever reached your library"
+            )
+
         service_name = request.arr_service.name
         failed = ctx.of_type(EventType.REQUEST_FAILED)
         missing = ctx.of_type(EventType.NOT_IN_ARR)

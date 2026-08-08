@@ -30,6 +30,15 @@ class GrabbedButStalled(Rule):
             # honestly say. Staying quiet beats guessing at a payload we cannot read.
             return None
 
+        # Samples stop being written when the client stops answering, so the newest one
+        # keeps ageing and "no progress for 20h" becomes true of Sleutharr's records
+        # rather than of the download. Judging a transfer on readings this old would be
+        # inventing a stall out of our own blind spot.
+        if not ctx.can_speak_for(latest.service):
+            return ctx.unreachable_verdict(
+                latest.service, "whether this download is still moving"
+            )
+
         progress = float(facts.get("progress") or 0)
         state = str(facts.get("state") or "")
         name = str(facts.get("name") or "the release")
@@ -54,6 +63,49 @@ class GrabbedButStalled(Rule):
                 evidence=[latest],
                 severity=Severity.ERROR,
                 code="DOWNLOAD_CLIENT_ERROR",
+            )
+
+        # If the client has told us its own upstream is broken, that is the answer and
+        # everything below is a symptom of it. Quoting the client's exact words beats any
+        # inference we could draw from the queue row.
+        client_state = latest.service.client_state if latest.service else {}
+        if isinstance(client_state, dict) and client_state.get("failing_servers"):
+            servers = "; ".join(str(s) for s in client_state["failing_servers"])
+            extra = ""
+            for warning in client_state.get("warnings") or []:
+                if warning:
+                    extra = f"\n\nMost recent warning: {warning}"
+                    break
+            return self.verdict(
+                f"{latest.service.name} cannot reach its news server, so nothing will "
+                f"download until that is fixed — including this one.\n\n{servers}{extra}",
+                next_step=(
+                    "Fix the news server connection in your download client. Nothing is "
+                    "wrong with this release, and blocklisting it would not help: every "
+                    "download is stalled for the same reason, and the replacement would "
+                    "stall in exactly the same place."
+                ),
+                link=ctx.arr_queue_url(),
+                evidence=[latest],
+                severity=Severity.ERROR,
+                code="DOWNLOADER_PROVIDER_DOWN",
+            )
+
+        if (
+            isinstance(client_state, dict)
+            and client_state.get("paused")
+            and not facts.get("is_paused")
+        ):
+            return self.verdict(
+                f"{latest.service.name} is paused, so nothing in its queue is moving — "
+                f"including this one, which is sitting at {float(facts.get('progress') or 0) * 100:.1f}%.",
+                next_step=(
+                    "Resume the download client. This is a client-wide pause, not "
+                    "something set on this download, so everything else is waiting too."
+                ),
+                link=ctx.arr_queue_url(),
+                evidence=[latest],
+                code="DOWNLOADER_PAUSED",
             )
 
         if facts.get("is_paused"):

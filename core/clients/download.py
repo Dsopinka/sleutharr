@@ -118,8 +118,45 @@ class DownloadItem:
         }
 
 
+@dataclass
+class ProviderHealth:
+    """Whether the client can actually reach what it downloads from.
+
+    A usenet client with no working news server, or one that is paused, stalls every
+    transfer at once while reporting nothing wrong against any individual download. That
+    is invisible from the queue rows alone, and it is the difference between "this
+    release is bad" and "your downloader is not working" -- opposite fixes.
+    """
+
+    #: False only when the client itself reports a problem, never when we simply could
+    #: not tell. Unknown must stay unknown.
+    ok: bool = True
+    paused: bool = False
+    #: The client's own wording, quoted rather than paraphrased.
+    detail: str = ""
+    failing_servers: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "ok": self.ok,
+            "paused": self.paused,
+            "detail": self.detail,
+            "failing_servers": self.failing_servers,
+            "warnings": self.warnings,
+        }
+
+
 class DownloadClient(BaseClient):
     """Interface every download client implements."""
+
+    def provider_health(self) -> ProviderHealth | None:
+        """Client-wide health, or None where the concept does not apply.
+
+        Torrent clients have no equivalent: there is no single upstream whose failure
+        stops everything, so they return None and no rule will claim otherwise.
+        """
+        return None
 
     #: True when download ids are globally-unique infohashes.
     ids_globally_unique: bool = True
@@ -600,6 +637,58 @@ class SabnzbdClient(DownloadClient):
             raise AuthError(f"SABnzbd rejected the API key: {error or 'unknown error'}")
         return ProbeResult(ok=True, detail=f"SABnzbd {version}".strip(), version=version)
 
+    def provider_health(self) -> ProviderHealth | None:
+        """Read SABnzbd's own view of its news servers.
+
+        Field names verified against the SABnzbd 5.0 API reference rather than recalled:
+        `mode=status` returns `status.servers[]` whose entries carry `servername`,
+        `serveractive`, `servererror` (empty string when fine) and `serveroptional`;
+        `mode=warnings` returns `warnings[]` of `{text, type, time}`; the `mode=queue`
+        object carries `paused`.
+        """
+        health = ProviderHealth()
+
+        status = (self.get_json("/api", params=self._params("status")) or {}).get("status")
+        servers = (status or {}).get("servers")
+        if isinstance(servers, list):
+            for server in servers:
+                if not isinstance(server, dict):
+                    continue
+                # An optional server being down is tolerable by definition -- SAB carries
+                # on through the others -- so flagging it would cry wolf.
+                if server.get("serveroptional"):
+                    continue
+                name = str(server.get("servername") or "a news server")
+                error = str(server.get("servererror") or "").strip()
+                if error:
+                    health.ok = False
+                    health.failing_servers.append(f"{name}: {error}")
+                elif server.get("serveractive") is False:
+                    health.ok = False
+                    health.failing_servers.append(f"{name}: not active")
+
+        queue = (self.get_json("/api", params=self._params("queue", limit=0)) or {}).get(
+            "queue"
+        )
+        if isinstance(queue, dict) and queue.get("paused") is True:
+            health.paused = True
+
+        warnings = (self.get_json("/api", params=self._params("warnings")) or {}).get(
+            "warnings"
+        )
+        if isinstance(warnings, list):
+            health.warnings = [
+                str(w.get("text") or "").strip()
+                for w in warnings[-3:]
+                if isinstance(w, dict) and str(w.get("text") or "").strip()
+            ]
+
+        if health.failing_servers:
+            health.detail = "; ".join(health.failing_servers)
+        elif health.paused:
+            health.detail = "the queue is paused"
+        return health
+
     def items_by_id(self, download_ids: list[str]) -> dict[str, DownloadItem]:
         wanted = {self._key(i) for i in download_ids if i}
         if not wanted:
@@ -720,6 +809,44 @@ class NzbgetClient(DownloadClient):
         return ProbeResult(
             ok=True, detail=f"NZBGet {version}".strip(), version=str(version or "")
         )
+
+    def provider_health(self) -> ProviderHealth | None:
+        """NZBGet's view of its own state.
+
+        Verified against the NZBGet `status` API reference: it returns `NewsServers[]`
+        of `{ID, Active}` plus `DownloadPaused`. Note that `Active` means *enabled in
+        the configuration*, not *currently connected* -- NZBGet reports connection
+        failures only in its log, not per server. So a disabled server is reported as
+        disabled, and nothing here is dressed up as a connection error it might not be.
+        """
+        status = self.rpc("status")
+        if not isinstance(status, dict):
+            return None
+
+        health = ProviderHealth()
+        servers = status.get("NewsServers")
+        if isinstance(servers, list):
+            disabled = [
+                str(s.get("ID"))
+                for s in servers
+                if isinstance(s, dict) and s.get("Active") is False
+            ]
+            # All of them disabled is unambiguous. Some disabled is normal -- plenty of
+            # setups keep a spare block account switched off.
+            if disabled and len(disabled) == len(servers):
+                health.ok = False
+                health.failing_servers = [
+                    f"server {i} is disabled in NZBGet's configuration" for i in disabled
+                ]
+
+        if status.get("DownloadPaused") is True:
+            health.paused = True
+
+        if health.failing_servers:
+            health.detail = "; ".join(health.failing_servers)
+        elif health.paused:
+            health.detail = "the queue is paused"
+        return health
 
     def items_by_id(self, download_ids: list[str]) -> dict[str, DownloadItem]:
         wanted = {self._key(i) for i in download_ids if i}
