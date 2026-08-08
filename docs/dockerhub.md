@@ -33,8 +33,18 @@ docker run -d --name sleutharr \
   -p 8080:8080 \
   -e PUID=1000 -e PGID=1000 -e TZ=Etc/UTC \
   -v /path/to/config:/config \
-  YOUR_DOCKERHUB_USER/sleutharr:latest
+  dsopinka123/sleutharr:latest
 ```
+
+`latest` always points at a released version. To pin one, use it by number:
+
+```bash
+docker pull dsopinka123/sleutharr:2.11.1   # exact release
+docker pull dsopinka123/sleutharr:2.11     # newest patch on that minor
+```
+
+The same image is published to `ghcr.io/dsopinka/sleutharr` with identical digests, so
+either registry gives you the same bytes.
 
 Then open `http://your-server:8080` and add your request manager on the Settings page.
 Press **Find my other services** and it reads the rest of your setup out of it.

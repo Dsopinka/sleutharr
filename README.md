@@ -365,6 +365,32 @@ Python 3.12, Django 5.2, DRF, SQLite in WAL mode, APScheduler in-process, httpx,
 server-rendered templates with HTMX. One container, one process, no broker, no Postgres,
 no JS build step. htmx is vendored, so the UI needs no outbound internet.
 
+### Releasing
+
+`VERSION` in `core/context.py` is the only source of truth. It names the image tag, the
+git tag and the version the UI reports, so those three cannot drift apart. To ship:
+
+1. Bump `VERSION` (semver `X.Y.Z`, no leading `v`).
+2. Push to `main`.
+
+CI does the rest, under three rules that exist because each one has already gone wrong
+somewhere:
+
+- **Nothing publishes unless the version is new.** A released version means one exact
+  image forever; republishing it would change what it means for everyone already running
+  it. Push without bumping and the build passes, publishes nothing, and says so in the
+  job summary.
+- **Both registries or neither.** GHCR and Docker Hub are pushed from a single build and
+  their digests are compared afterwards. They diverged silently once; that is a build
+  failure now. A missing Docker Hub secret fails the job rather than quietly shipping to
+  GHCR alone.
+- **A published version is tagged in git.** `vX.Y.Z` is pushed on success, so "what is in
+  2.11.1" is answerable from the repository.
+
+`core/tests/test_release.py` checks the version is a legal Docker tag and that the
+workflow can still find it, because that class of mistake otherwise surfaces at the end
+of a release build in wording that never mentions the real cause.
+
 ---
 
 ## Limitations

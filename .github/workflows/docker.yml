@@ -1,10 +1,31 @@
 name: Build and publish image
 
+# Release protocol, in one place:
+#
+#   core/context.py VERSION is the only source of truth for what an image is called.
+#
+#   1. Nothing is published unless that version is new. `latest` therefore always
+#      resolves to a real, named version, and a released version is never rewritten to
+#      mean different code.
+#   2. Every published version is pushed to GHCR and Docker Hub from one build, and the
+#      digests are compared afterwards. The two registries diverged silently once; that
+#      is now a build failure rather than something discovered months later.
+#   3. A successful publish tags the commit `vX.Y.Z`, so git history, the image tags and
+#      the version shown in the UI cannot drift apart.
+#
+# Forgetting to bump VERSION does not break anything -- it just publishes nothing, and
+# says so loudly in the job summary.
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      allow_single_registry:
+        description: "Publish even if only one registry is configured"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -31,7 +52,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # to push the vX.Y.Z tag
       # Lets the built-in GITHUB_TOKEN push to GHCR; no PAT needed.
       packages: write
     env:
@@ -40,26 +61,67 @@ jobs:
       DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, so the version check can see them
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Read the version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("core/context.py").read_text()
+          found = re.search(r'^VERSION\s*=\s*"([^"]+)"', text, re.M)
+          if not found:
+              sys.exit("core/context.py has no VERSION assignment.")
+          print(found.group(1))
+          PY
+          )"
+          # Registry tags are far less forgiving than a Python string. Anything that is
+          # not plain X.Y.Z would be rejected, or worse, accepted and sorted oddly.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::VERSION '$version' is not X.Y.Z. Docker tags must be plain semver."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${version%.*}" >> "$GITHUB_OUTPUT"
+          echo "Version under build: $version" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Decide which registries to publish to
         id: targets
         run: |
-          # GHCR always; Docker Hub only once its secrets exist, so the workflow keeps
-          # working unchanged before they are added.
+          set -euo pipefail
+          # `tr` rather than bash's ${x,,}: both registries reject uppercase, and this
+          # way the step runs identically under the bash 3.2 on a developer's Mac, so it
+          # can be tested without pushing a commit to find out.
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          ghcr="ghcr.io/$(lower "$GITHUB_REPOSITORY")"
+          echo "ghcr=$ghcr" >> "$GITHUB_OUTPUT"
+
+          # Docker Hub repository names must be lowercase; a capitalised secret would be
+          # rejected at push time with a message that does not mention casing.
+          hub=""
+          if [ -n "${DOCKERHUB_USER}" ]; then
+            hub="docker.io/$(lower "$DOCKERHUB_USER")/sleutharr"
+          fi
+          echo "hub=$hub" >> "$GITHUB_OUTPUT"
+
+          images="$ghcr"
+          [ -n "$hub" ] && images="$images"$'\n'"$hub"
           {
             echo 'images<<EOF'
-            echo "ghcr.io/${GITHUB_REPOSITORY,,}"
-            if [ -n "$DOCKERHUB_USER" ]; then
-              echo "docker.io/${DOCKERHUB_USER}/sleutharr"
-              echo "publishing to Docker Hub as ${DOCKERHUB_USER}/sleutharr" >&2
-            else
-              echo "DOCKERHUB_USERNAME not set - skipping Docker Hub" >&2
-            fi
+            echo "$images"
             echo EOF
           } >> "$GITHUB_OUTPUT"
+
+          # Publishing to one registry when two are expected is how they drift apart.
+          # It is allowed only when asked for explicitly, so a lapsed Docker Hub token
+          # cannot quietly leave that registry a few versions behind.
+          if [ -z "$hub" ] && [ "${{ inputs.allow_single_registry }}" != "true" ]; then
+            echo "::error::Docker Hub secrets are missing. Publishing to GHCR alone is how the two registries diverged before. Set DOCKERHUB_USERNAME/DOCKERHUB_TOKEN, or re-run with allow_single_registry."
+            exit 1
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -69,24 +131,66 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        if: env.DOCKERHUB_USER != ''
+        if: steps.targets.outputs.hub != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Before the version check, not after: that check asks the registries a question
+      # through `buildx imagetools`, so buildx has to exist first. Both steps are quick
+      # and do nothing on a run that turns out to have nothing to publish.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Has this version already been published?
+        id: released
+        run: |
+          set -uo pipefail
+          version="${{ steps.version.outputs.version }}"
+          published=false
+          for image in ${{ steps.targets.outputs.ghcr }} ${{ steps.targets.outputs.hub }}; do
+            if docker buildx imagetools inspect "${image}:${version}" >/dev/null 2>&1; then
+              echo "${image}:${version} already exists."
+              published=true
+            fi
+          done
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+
+          if [ "$published" = "true" ]; then
+            {
+              echo "### Nothing published"
+              echo
+              echo "Version \`$version\` is already released, so this build was not pushed."
+              echo "A released version always means one exact image; republishing it would"
+              echo "change what it means for everyone already running it."
+              echo
+              echo "Bump \`VERSION\` in \`core/context.py\` to ship these changes."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::VERSION $version is already published - nothing was pushed. Bump core/context.py to release."
+          fi
+
       - id: meta
+        if: steps.released.outputs.published == 'false'
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.targets.outputs.images }}
+          # Driven by core/context.py rather than by git refs, so the tag on the image
+          # and the version the app reports itself as are the same string by
+          # construction.
+          #
+          # `main` is kept in the list only because it already exists in both registries
+          # from earlier builds: dropping it would leave a tag that still resolves,
+          # forever, to whatever was current the day it stopped being written.
           tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.major_minor }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
 
       - name: Build and push
+        if: steps.released.outputs.published == 'false'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -101,8 +205,56 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Both registries must resolve to the same image
+        if: steps.released.outputs.published == 'false' && steps.targets.outputs.hub != ''
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          fail=0
+          for tag in "$version" latest; do
+            a=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' \
+                  "${{ steps.targets.outputs.ghcr }}:${tag}")
+            b=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' \
+                  "${{ steps.targets.outputs.hub }}:${tag}")
+            if [ "$a" != "$b" ]; then
+              echo "::error::${tag}: GHCR is $a but Docker Hub is $b"
+              fail=1
+            else
+              echo "$tag -> $a (identical on both)"
+            fi
+          done
+          [ "$fail" -eq 0 ] || exit 1
+
+      - name: Tag the commit
+        if: steps.released.outputs.published == 'false' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          # Keeps git in step with the registries, so "what is in v2.11.1" is answerable
+          # from the repository alone.
+          if git rev-parse "v${version}" >/dev/null 2>&1; then
+            echo "Tag v${version} already exists locally; leaving it alone."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${version}" -m "Release ${version}"
+          git push origin "v${version}"
+          echo "Tagged v${version}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarise what shipped
+        if: steps.released.outputs.published == 'false'
+        run: |
+          {
+            echo "### Published ${{ steps.version.outputs.version }}"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Update the Docker Hub description
-        if: env.DOCKERHUB_USER != ''
+        if: steps.targets.outputs.hub != ''
         uses: peter-evans/dockerhub-description@v4
         continue-on-error: true
         with:
