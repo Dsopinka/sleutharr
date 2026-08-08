@@ -323,10 +323,20 @@ class OmbiClient(RequestManagerClient):
         }
 
     def probe(self) -> ProbeResult:
-        data = self.get_json("/Status")
+        # `/Settings/about` is the one that actually carries a version. `/Status` returns
+        # the bare integer 200 as its whole JSON body -- confirmed on Ombi 4.53.10 --
+        # so nothing can be read from it and it is only a reachability check.
+        #
+        # Both validate the API key when one is sent, which matters: they answer 200 to
+        # an anonymous caller and 401 to a wrong key, so a probe that sent no credentials
+        # would call any Ombi healthy no matter what the user typed. We always send the
+        # header, which turns this into a real credential check.
+        data = self.get_json("/Settings/about")
         version = ""
         if isinstance(data, dict):
             version = str(data.get("version") or data.get("Version") or "")
+        if not version:
+            self.get_json("/Status")
         return ProbeResult(ok=True, detail=f"Ombi {version}".strip(), version=version)
 
     def iter_requests(
@@ -358,12 +368,61 @@ class OmbiClient(RequestManagerClient):
             for row in rows:
                 if not isinstance(row, dict):
                     continue
+                if media_type == MediaType.TV:
+                    yield from self.parse_ombi_tv(row)
+                    continue
                 parsed = self.parse_ombi_request(row, media_type)
                 if parsed is not None:
                     yield parsed
 
+    def parse_ombi_tv(self, parent: dict[str, Any]) -> Iterator[NormalisedRequest]:
+        """One request per child, because that is where a TV request actually lives.
+
+        Confirmed against a live Ombi 4.53.10, and it is not what the entity names
+        suggest. A TV parent carries only the *show*: title, tvDbId, totalSeasons,
+        artwork. It has no `requestedDate`, no `approved`, no `available` and no user --
+        every one of those is on `childRequests[]`, because in Ombi the child is the
+        request and the parent is the thing requested.
+
+        Reading the parent therefore yields a request with no date, which is exactly the
+        shape this parser discards as unusable, so every television request on Ombi was
+        silently dropped and none was ever tracked.
+
+        Emitting one per child is also the right granularity: a user who asks for season
+        1 and later season 2 makes two child requests, which can be approved, denied and
+        fulfilled independently.
+        """
+        children = [c for c in parent.get("childRequests") or [] if isinstance(c, dict)]
+        if not children:
+            # No child means nothing was actually requested. Parsing the parent would
+            # produce a dateless request that is discarded anyway; be explicit instead.
+            return
+
+        # The show's identity lives on the parent, the request's state on the child.
+        identity = {
+            key: parent.get(key)
+            for key in ("title", "tvDbId", "imdbId", "releaseDate", "externalProviderId")
+        }
+        for child in children:
+            merged = {**identity, **child}
+            # `seasonRequests` on this child is the answer; the parent's sibling children
+            # are other people's requests, or this user's other ones.
+            merged.pop("childRequests", None)
+
+            # Ombi's child requests and movie requests are separate tables with separate
+            # id sequences, so child 1 and movie 1 both exist and would collide on the
+            # (service, remote_id) key -- one title silently overwriting the other.
+            # Negative ids keep the two namespaces apart. Nothing sends this id back to
+            # Ombi: it has no retry endpoint, so it is ours to shape.
+            child_id = int(child.get("id") or 0)
+            parsed = self.parse_ombi_request(
+                merged, MediaType.TV, remote_id=-child_id if child_id else 0
+            )
+            if parsed is not None:
+                yield parsed
+
     def parse_ombi_request(
-        self, item: dict[str, Any], media_type: str
+        self, item: dict[str, Any], media_type: str, remote_id: int | None = None
     ) -> NormalisedRequest | None:
         requested_at = _dt(item.get("requestedDate"))
         if requested_at is None:
@@ -411,7 +470,7 @@ class OmbiClient(RequestManagerClient):
             year = int(release[:4])
 
         return NormalisedRequest(
-            remote_id=int(item.get("id") or 0),
+            remote_id=int(item.get("id") or 0) if remote_id is None else remote_id,
             media_type=media_type,
             requested_at=requested_at,
             updated_at=_dt(item.get("markedAsAvailable"))

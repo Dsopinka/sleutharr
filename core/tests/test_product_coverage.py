@@ -759,3 +759,137 @@ class EpisodeIdsAreNotSeriesIds(TestCase):
         # Plex spells its types in lower case and gives a show no Part at all.
         show = PlexClient._parse_item({"ratingKey": "9", "title": "x", "type": "show"})
         self.assertFalse(identifies_one_file(show))
+
+
+class OmbiTelevisionLivesOnTheChild(TestCase):
+    """Pinned from a live Ombi 4.53.10, because the entity names mislead.
+
+    `/Request/tv` returns the *show*, not the request. The parent carries title, tvDbId,
+    totalSeasons and artwork -- and no requestedDate, no approved, no available, no user.
+    All of those are on `childRequests[]`, because in Ombi the child is the request and
+    the parent is the thing being requested.
+
+    A parser reading the parent gets a request with no date, which is the shape it
+    discards as unusable. So every television request on Ombi was dropped in silence:
+    not mis-parsed, not warned about, simply never tracked.
+    """
+
+    # Exactly the shape the live server returned, trimmed to the fields we read.
+    PARENT = {
+        "id": 1,
+        "title": "Severance",
+        "tvDbId": 371980,
+        "imdbId": "tt11280740",
+        "releaseDate": "2022-02-18T00:00:00",
+        "totalSeasons": 2,
+        "childRequests": [
+            {
+                "id": 371980,
+                "parentRequestId": 1,
+                "title": "Severance",
+                "requestedDate": "2026-08-08T13:24:13.3601691Z",
+                "approved": True,
+                "available": False,
+                "denied": None,
+                "markedAsApproved": "2026-08-08T13:24:13.3601691Z",
+                "requestedUser": {"userName": "sleuth", "userAlias": None},
+                "seasonRequests": [
+                    {"seasonNumber": 1, "episodes": []},
+                    {"seasonNumber": 2, "episodes": []},
+                ],
+            }
+        ],
+    }
+
+    def _client(self):
+        from core.clients.requestmanager import OmbiClient
+        from core.models import ServiceKind, ServiceVariant
+        from core.tests.factories import make_service
+
+        return OmbiClient(
+            make_service(
+                ServiceKind.REQUEST_MANAGER,
+                variant=ServiceVariant.OMBI,
+                name="Ombi-tv",
+                base_url="http://ombi:5000",
+            )
+        )
+
+    def test_the_parent_alone_is_not_a_request(self):
+        """The regression itself: no date on the parent, so it used to vanish."""
+        from core.models import MediaType
+
+        parent_only = {k: v for k, v in self.PARENT.items() if k != "childRequests"}
+        self.assertIsNone(
+            self._client().parse_ombi_request(parent_only, MediaType.TV),
+            "the parent parsed as a request despite carrying no request",
+        )
+
+    def test_a_tv_request_is_read_from_its_child(self):
+        from core.models import RequestState
+
+        got = list(self._client().parse_ombi_tv(self.PARENT))
+        self.assertEqual(len(got), 1)
+        request = got[0]
+
+        # Identity from the parent, state from the child.
+        self.assertEqual(request.title, "Severance")
+        self.assertEqual(request.tvdb_id, 371980)
+        self.assertEqual(request.request_state, RequestState.APPROVED)
+        self.assertEqual(request.requested_by, "sleuth")
+        self.assertEqual(request.seasons, [1, 2])
+        self.assertIsNotNone(request.requested_at)
+
+    def test_each_child_is_its_own_request(self):
+        """Season 1 now and season 2 later are two asks, approved independently."""
+        parent = {
+            **self.PARENT,
+            "childRequests": [
+                self.PARENT["childRequests"][0],
+                {
+                    "id": 88,
+                    "requestedDate": "2026-08-09T09:00:00Z",
+                    "approved": False,
+                    "available": False,
+                    "requestedUser": {"userName": "someone-else"},
+                    "seasonRequests": [{"seasonNumber": 3, "episodes": []}],
+                },
+            ],
+        }
+        got = list(self._client().parse_ombi_tv(parent))
+        self.assertEqual(len(got), 2)
+        self.assertEqual([r.seasons for r in got], [[1, 2], [3]])
+        self.assertEqual(got[1].requested_by, "someone-else")
+        # A child must report its own seasons, not the union of its siblings'.
+        self.assertNotIn(3, got[0].seasons)
+
+    def test_tv_and_movie_ids_cannot_collide(self):
+        """Child requests and movie requests are separate tables, both starting at 1.
+
+        Sharing a remote_id would have one title silently overwrite the other under the
+        (service, remote_id) uniqueness key.
+        """
+        from core.models import MediaType
+
+        movie = self._client().parse_ombi_request(
+            {
+                "id": 1,
+                "title": "Dune: Part Two",
+                "requestedDate": "2026-08-08T13:24:11Z",
+                "theMovieDbId": 693134,
+                "approved": True,
+            },
+            MediaType.MOVIE,
+        )
+        colliding = {**self.PARENT, "childRequests": [
+            {**self.PARENT["childRequests"][0], "id": 1}
+        ]}
+        tv = list(self._client().parse_ombi_tv(colliding))[0]
+
+        self.assertEqual(movie.remote_id, 1)
+        self.assertNotEqual(tv.remote_id, movie.remote_id)
+
+    def test_a_show_nobody_requested_yields_nothing(self):
+        self.assertEqual(
+            list(self._client().parse_ombi_tv({**self.PARENT, "childRequests": []})), []
+        )

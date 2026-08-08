@@ -606,13 +606,23 @@ class OmbiFailedWalkTests(TestCase):
         """
         from core.clients.base import ServiceError
 
+        # The real /Request/tv shape: the parent is the show, and the request itself --
+        # date, state, user, seasons -- is on the child.
         tv_row = {
             "id": 2,
             "title": "Severance",
             "tvDbId": 371980,
-            "requestedDate": "2026-07-02T10:00:00Z",
-            "approved": True,
-            "available": False,
+            "childRequests": [
+                {
+                    "id": 91,
+                    "parentRequestId": 2,
+                    "requestedDate": "2026-07-02T10:00:00Z",
+                    "approved": True,
+                    "available": False,
+                    "requestedUser": {"userName": "sleuth"},
+                    "seasonRequests": [{"seasonNumber": 1, "episodes": []}],
+                }
+            ],
         }
 
         def both(request: httpx.Request) -> httpx.Response:

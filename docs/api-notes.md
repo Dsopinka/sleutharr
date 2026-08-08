@@ -19,7 +19,7 @@ call.
 | NZBGet | 26.2 (2026-08-08) | permille `Health` confirmed |
 | Jellyfin | 10.11.11 (2026-08-08) | **TV id join was broken** — Findings 17, 19 |
 | Emby | 4.9.5.0 (2026-08-08) | probe, paths and pagination confirmed; see caveat below |
-| Ombi | v4 (2026-08-08) | **could delete every tracked request** — Finding 18 |
+| Ombi | 4.53.10 (2026-08-08) | **deleted requests, and tracked no TV** — Findings 18, 18b |
 | Seerr/Overseerr, Sonarr, Radarr, qBittorrent, Plex | schema/source only | not yet driven live |
 
 Emby's caveat, stated plainly because "verified" should mean one thing: its probe,
@@ -834,6 +834,41 @@ clean 401 rather than a false success.
 `/Status` returns the bare integer `200` as its JSON body, not an object, so no version
 can be read from it. The probe tolerates that and reports no version rather than
 inventing one.
+
+## Finding 18b — on Ombi the TV request is the *child*, and the parent is the show
+
+Confirmed against a live Ombi 4.53.10, and the reason Ombi tracked no television at all.
+
+Section 6 above lists `BaseRequest` fields (`requestedDate`, `approved`, `available`,
+`requestedUser`) and then `TvRequests` with its `childRequests[]`, which reads as though
+a TV request is a `BaseRequest` that also has children. It is not. What `/Request/tv`
+returns per row:
+
+| | parent (`TvRequests`) | child (`ChildRequests`) |
+|---|---|---|
+| `title`, `tvDbId`, `imdbId`, `releaseDate`, `totalSeasons` | ✅ | (`title` only) |
+| `requestedDate` | **absent** | ✅ |
+| `approved`, `available`, `denied` | **absent** | ✅ |
+| `requestedUser`, `requestedByAlias` | **absent** | ✅ |
+| `seasonRequests[]` | **absent** | ✅ |
+
+In Ombi the child *is* the request and the parent is the thing requested. A parser
+reading the parent gets a request with no date — the exact shape it discards as unusable
+— so every television request was dropped silently. Not mis-parsed, not warned about:
+never tracked.
+
+Two consequences beyond the obvious fix:
+
+**One request per child, not per show.** A user who asks for season 1 and later season 2
+creates two children, approved and fulfilled independently. Collapsing them would report
+one state for two different asks.
+
+**The two id spaces overlap.** `MovieRequests` and `ChildRequests` are separate tables
+with separate sequences, so movie `1` and child `1` both exist — verified on the live
+server, which handed out exactly that pair. Keyed on `(service, remote_id)` they collide
+and one title silently replaces the other. TV children are stored negated to keep the
+namespaces apart; nothing sends the id back to Ombi, which has no retry endpoint, so its
+shape is ours to choose.
 
 ## Finding 19 — a media server can answer perfectly and still have nothing to say
 
