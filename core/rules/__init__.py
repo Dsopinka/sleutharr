@@ -15,6 +15,7 @@ from core.rules.r05_grabbed_but_stalled import GrabbedButStalled
 from core.rules.r06_no_release_found import NoReleaseFound
 from core.rules.r07_not_in_media_server import NotInMediaServer
 from core.rules.r08_wrong_quality import WrongQuality
+from core.rules.r09_download_in_progress import DownloadInProgress
 
 # Order matters: first match wins, so the most specific and most upstream causes come
 # first. A request that was never added to Sonarr cannot also be "stalled in the client",
@@ -28,6 +29,9 @@ RULES: list[Rule] = [
     NotInMediaServer(),
     WrongQuality(),
     NoReleaseFound(),
+    # Last, and it must stay last: it is the only rule that reports something working,
+    # so it may speak only once every rule looking for a fault has declined to.
+    DownloadInProgress(),
 ]
 
 __all__ = ["RULES", "Rule", "RuleContext", "Verdict"]
@@ -58,6 +62,7 @@ DIAGNOSIS_TITLES: dict[str, str] = {
     "NOT_RELEASED_YET": "Not out yet",
     "NEVER_SEARCHED": "Never actually searched for",
     "NO_RELEASE_FOUND": "Nothing good enough found yet",
+    "DOWNLOAD_IN_PROGRESS": "On its way",
     "FULFILLED": "Done",
 }
 

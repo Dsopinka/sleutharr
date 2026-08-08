@@ -735,14 +735,29 @@ class UsenetIsNotATorrent(RuleTestCase):
         # And it must not invent a swarm that does not exist.
         self.assertNotIn("seed", verdict.message.lower())
 
-    def test_progressing_usenet_download_says_nothing(self):
+    def test_progressing_usenet_download_is_never_called_a_fault(self):
+        """A healthy usenet download must not be reported as anything wrong.
+
+        This used to assert no verdict at all, which was how "nothing is wrong" was
+        expressed before there was a way to say "this is fine, it is still coming". The
+        protection being tested is unchanged and is the one that matters: no fault code,
+        and above all no advice to blocklist a release that is downloading perfectly.
+        """
         request = make_request(service=self.seerr, arr_service=self.radarr)
         add_event(request, EventType.GRABBED, hours_ago=30)
         add_download_sample(request, self._sab_sample("20"), usenet=True, hours_ago=24)
         add_download_sample(request, self._sab_sample("74"), usenet=True, hours_ago=0.1)
 
         verdict = self.verdict_for(request)
-        self.assertIsNone(verdict, f"healthy usenet download was diagnosed: {verdict}")
+        self.assertIsNotNone(verdict)
+        self.assertEqual(
+            verdict.code,
+            "DOWNLOAD_IN_PROGRESS",
+            f"healthy usenet download was diagnosed as a fault: {verdict}",
+        )
+        self.assertEqual(verdict.severity, Severity.INFO)
+        self.assertNotIn("blocklist", (verdict.next_step or "").lower())
+        self.assertNotIn("seed", verdict.message.lower())
 
     def test_missing_articles_is_the_one_case_that_should_blocklist(self):
         """Low article health is unrecoverable, so here the torrent-style advice is right."""

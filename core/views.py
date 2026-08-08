@@ -65,7 +65,7 @@ def _unfulfilled() -> "models.QuerySet[TrackedRequest]":
 #: Verdicts that mean "there is nothing for you to do here". These are real answers, not
 #: problems, and they can sit unchanged for months -- a film not released until 2027 would
 #: otherwise keep the dashboard permanently non-empty.
-WAITING_CODES = {"NOT_RELEASED_YET", "DECLINED"}
+WAITING_CODES = {"NOT_RELEASED_YET", "DECLINED", "DOWNLOAD_IN_PROGRESS"}
 
 
 def _is_just_waiting(tracked) -> bool:
