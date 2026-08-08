@@ -2,6 +2,10 @@
 
 **"I requested this — where did it die?"**
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=flat&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dsopinka)
+[![Docker](https://img.shields.io/badge/ghcr.io-sleutharr-2496ED?style=flat&logo=docker&logoColor=white)](https://github.com/Dsopinka/sleutharr/pkgs/container/sleutharr)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat)](LICENSE)
+
 Sleutharr stitches a single media request into one timeline across your request manager,
 Sonarr/Radarr, your download client and your media server, then tells you where the chain
 broke and what to do about it.
@@ -379,6 +383,11 @@ no JS build step. htmx is vendored, so the UI needs no outbound internet.
   verified against upstream OpenAPI schemas and source code rather than a running server;
   see the `[UNVERIFIED-LIVE]` markers in `docs/api-notes.md` for the specific items worth
   confirming with `probe_services --verify`.
+
+## Support
+
+Sleutharr is free and MIT licensed, and it stays that way. If it saved you an evening of
+clicking through five web UIs, you can [buy me a coffee](https://buymeacoffee.com/dsopinka).
 
 ## License
 

@@ -543,3 +543,9 @@ table.discovery input[type=checkbox] { width: auto; }
   border-top: 1px solid var(--border-soft);
 }
 .waiting-block > summary:hover { color: var(--text-dim); }
+
+
+/* Support link in the footer. Deliberately small and last -- the app should earn it,
+   not nag for it. No banner, no modal, no dismissable prompt. */
+.footer .coffee { color: var(--text-faint); }
+.footer .coffee:hover { color: #ffdd00; text-decoration: none; }

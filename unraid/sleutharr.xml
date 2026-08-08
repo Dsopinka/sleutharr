@@ -65,8 +65,8 @@
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>
-  <DonateText/>
-  <DonateLink/>
+  <DonateText>If Sleutharr saved you some time, buy me a coffee.</DonateText>
+  <DonateLink>https://buymeacoffee.com/dsopinka</DonateLink>
   <Requires/>
 
   <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp"

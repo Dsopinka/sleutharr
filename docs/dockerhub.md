@@ -63,3 +63,8 @@ occasionally misfire, and a misfiring rule with a delete key destroys real downl
 ## Documentation
 
 Full docs, install guide and source: **https://github.com/Dsopinka/sleutharr**
+
+## Support
+
+Free and MIT licensed. If it saved you an evening, you can
+[buy me a coffee](https://buymeacoffee.com/dsopinka).
