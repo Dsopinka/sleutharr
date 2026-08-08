@@ -16,6 +16,7 @@ from core.rules.r06_no_release_found import NoReleaseFound
 from core.rules.r07_not_in_media_server import NotInMediaServer
 from core.rules.r08_wrong_quality import WrongQuality
 from core.rules.r09_download_in_progress import DownloadInProgress
+from core.rules.r10_arrived_but_not_reflected import ArrivedButNotReflected
 
 # Order matters: first match wins, so the most specific and most upstream causes come
 # first. A request that was never added to Sonarr cannot also be "stalled in the client",
@@ -29,6 +30,9 @@ RULES: list[Rule] = [
     NotInMediaServer(),
     WrongQuality(),
     NoReleaseFound(),
+    # After the fault rules: a file that has arrived can still have landed at the wrong
+    # quality, and that is the more useful thing to say when both are true.
+    ArrivedButNotReflected(),
     # Last, and it must stay last: it is the only rule that reports something working,
     # so it may speak only once every rule looking for a fault has declined to.
     DownloadInProgress(),
@@ -63,6 +67,7 @@ DIAGNOSIS_TITLES: dict[str, str] = {
     "NEVER_SEARCHED": "Never actually searched for",
     "NO_RELEASE_FOUND": "Nothing good enough found yet",
     "DOWNLOAD_IN_PROGRESS": "On its way",
+    "ARRIVED_NOT_REFLECTED": "Already arrived — your request manager has not noticed",
     "FULFILLED": "Done",
 }
 

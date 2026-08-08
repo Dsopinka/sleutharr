@@ -923,6 +923,31 @@ Two related shapes worth naming, since the next product will have them too:
   handing back a short library with no indication it was short — and a short library is
   read downstream as files the server does not have. It raises now.
 
+## Finding 20 — a request manager's status is its opinion, not the library's state
+
+Observed on a live Seerr 3.4.1 alongside a live Plex. Radarr had imported the film, Plex
+was serving it, Sleutharr had matched the imported path to a Plex item — and Seerr still
+reported the request as `PROCESSING`.
+
+The cause was in Seerr's own log: `Plex Scan — Scan interrupted`, an error on its
+recently-added scan. Its nightly full library scan still succeeded, so the status
+eventually corrected itself overnight and the whole thing looked like nothing worse than
+Seerr being slow.
+
+The lesson is about which source to believe. `MediaStatus` answers "has this request
+manager noticed yet", which is not the same question as "is it in the library" — and the
+two diverge exactly when something is broken, which is when a diagnosis matters. We check
+the media server directly, so on that question our own evidence is the better of the two
+and deferring to the request manager throws it away.
+
+Worth being clear about the direction this cuts. It is not licence to overrule the
+request manager generally: `is_fulfilled` still follows the request's own status, because
+that is what the *user* asked for and a media server match cannot tell whether every
+requested season arrived. What changed is that a confirmed arrival the request manager
+has not reflected is now reported (`ARRIVED_NOT_REFLECTED`) rather than passed over in
+silence — which had the item sitting on the dashboard, plainly finished, with no
+explanation of why it was there.
+
 ## Coverage without a live instance
 
 Most integrations here have never been pointed at a real server. `core/tests/
