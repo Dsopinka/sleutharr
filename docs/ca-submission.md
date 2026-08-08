@@ -1,79 +1,83 @@
-# Publishing to Community Applications
+# Getting into Unraid Community Applications
 
-Right now the template has to be copied onto the server by hand, because Unraid only
-offers templates it already knows about: your own files in
-`/boot/config/plugins/dockerMan/templates-user/`, and whatever Community Applications
-has indexed. There is no way to make a template "come with" an image otherwise — the
-image and the template are separate things, and Unraid never reads anything out of the
-image itself.
+CA is the only route to a template that appears on its own. Unraid offers templates it
+already knows about — your own files in `templates-user/`, or what CA has indexed — and it
+never reads anything out of a container image. So until this is listed, every user has to
+copy the XML onto their server by hand.
 
-So the only route to a template that appears on its own is a CA listing.
+## Where the template stands
 
-## What CA requires
-
-Submissions go through the portal at **<https://ca.unraid.net/submit>**, which validates
-and scans the XML before a moderator reviews it.
+Audited against the requirements at <https://ca.unraid.net/submit>. Everything the
+submission portal asks for is present:
 
 | Field | Status |
 |---|---|
 | `<Container version="2">` | ✅ |
-| `<Name>` | ✅ |
+| `<Name>` | ✅ `Sleutharr` |
 | `<Repository>` | ✅ `ghcr.io/dsopinka/sleutharr:latest` |
 | `<Registry>` | ✅ |
 | `<Overview>` | ✅ |
-| `<Support>` | ✅ GitHub issues |
-| `<Project>` | ✅ |
+| `<Support>` | ⚠️ GitHub issues — see below |
+| `<Project>` | ✅ `https://sleutharr.com` |
 | `<Category>` | ✅ `MediaApp:Video Tools:Utilities` |
 | `<Description>` | ✅ |
 | `<WebUI>` | ✅ |
-| `<TemplateURL>` | ✅ raw GitHub URL |
-| `<Icon>` | ✅ `unraid/icon.png`, 256×256 |
+| `<TemplateURL>` | ✅ raw GitHub URL, so template edits need no resubmission |
+| `<Icon>` | ✅ 256×256 PNG, verified reachable |
+| Config entries | ✅ port, `/config` path, `PUID`/`PGID`/`TZ`, CSRF origins |
 
-The template validates as well-formed XML and every required and recommended field is
-populated. The image is public on GHCR and pullable without credentials, built for
-`linux/amd64` by CI on every push.
+Both referenced URLs return 200, and the image pulls anonymously from GHCR and Docker Hub.
 
-## What is not done, and is not a code problem
+## The two things left, neither of them code
 
-Two of the remaining items are commitments rather than tasks:
+**A forum support thread.** GitHub issues satisfies the `<Support>` field, but the
+convention moderators look for is a thread in the Unraid forums' *Docker Containers*
+section. Create it, then update `<Support>` to point at it.
 
-**A support thread.** CA expects somewhere users can ask for help. GitHub issues satisfies
-the `<Support>` field, but the convention — and what moderators look for — is a thread in
-the Unraid forums' Docker Containers section. That has to be created by the author.
-
-**Ongoing maintenance.** Publishing carries stated obligations: keep the app working
-across Unraid releases, answer support requests, label beta versions clearly, and tell the
-moderators if you stop maintaining it. The moderation team removes apps that stop working
-or go unsupported.
+**A maintenance commitment.** Publishing carries stated obligations: keep the app working
+across Unraid releases, answer support requests in that thread, label beta versions
+clearly, and tell the moderation team if you stop maintaining it. Apps that stop working
+or go unsupported get removed.
 
 That second one is the real decision. A listing puts this in front of people who did not
-choose to try an early project, and every one of them who hits a bug becomes a support
-request. It is worth being deliberate about, not just technically ready.
+choose to try an early project, and each of them who hits a bug becomes a support request
+addressed to you.
 
-## An honest readiness assessment
+## How to submit, when you decide to
 
-**Ready:** the packaging. Image, registry, template, icon, CI, docs, 234 tests.
+1. Create the forum thread; put its URL in `<Support>` in `unraid/sleutharr.xml`.
+2. Go to <https://ca.unraid.net/submit>, point it at `https://github.com/Dsopinka/sleutharr`.
+3. Run **Validate**, then **Scan**. Fix anything flagged.
+4. Submit for moderation.
 
-**Thin:** real-world exposure. It has run against exactly one setup — one Seerr, one
-Sonarr, one Radarr, one SABnzbd, one Plex, no 4K split, no second download client, three
-requests. Several rules have never fired on real data, and two of the three bugs found so
-far only surfaced because that one real setup existed. A second and third setup will
-almost certainly find more.
+## Keep the registry in the template current
 
-**Untested combinations:** Ombi, Jellyfin, Emby, NZBGet, Transmission and Deluge are
-implemented against their documented APIs and covered by fixtures, but none has ever been
-pointed at a live instance.
+`<Repository>` points at GHCR, which CI rebuilds and republishes on every push to `main`.
+Docker Hub currently only updates when someone pushes it by hand.
 
-A reasonable order would be: run it against your own setup for a few weeks, let a couple
-of other people try it from the GHCR image first, then submit once the rules have fired on
-somebody else's data.
+**Whichever registry the template names has to be the one that stays current**, or CA users
+will sit on a stale image while the other registry moves ahead. Either leave it on GHCR, or
+add the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets so CI publishes both
+and the choice stops mattering.
 
-## If you do submit
+## Readiness, honestly
 
-1. Create the forum support thread and put its URL in `<Support>`.
-2. Go to <https://ca.unraid.net/submit>, point it at
-   `https://github.com/Dsopinka/sleutharr`, and run **Validate** then **Scan**.
-3. Fix anything it flags, then submit for moderation.
+**Ready:** packaging. Image, two registries, template, icon, CI, docs, install guide,
+website, 250 tests.
 
-Because `<TemplateURL>` points at the raw file on `main`, any later change to the template
-is picked up without resubmitting.
+**Thin:** real-world exposure. It has run against essentially one setup — one Seerr, one
+Sonarr, one Radarr, one SABnzbd, one Plex, no 4K split, no second download client. Several
+rules have never fired on live data. Every genuine bug found so far surfaced *because* that
+one real setup existed, not from the test suite:
+
+- a verdict claiming a file was missing from Plex when no media server was configured;
+- healthy 2160p reported as a quality fault;
+- a season pack counted as eight separate failures;
+- a fully-delivered request that could never be marked done;
+- a Plex rating key silently discarded for weeks after a field rename.
+
+**Never pointed at a live instance:** Ombi, Jellyfin, Emby, NZBGet, Transmission, Deluge.
+
+A reasonable sequence is to get two or three other people running it from the public image
+first, let the rules fire on somebody else's data, and submit once a release has gone by
+without a new class of bug appearing.

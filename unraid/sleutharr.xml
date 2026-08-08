@@ -8,7 +8,7 @@
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
   <Support>https://github.com/Dsopinka/sleutharr/issues</Support>
-  <Project>https://github.com/Dsopinka/sleutharr</Project>
+  <Project>https://sleutharr.com</Project>
   <Overview>
     Sleutharr answers one question: "I requested this - where did it die?"
 
